@@ -1,0 +1,37 @@
+{
+  "name": "@marvae24/douban-cli",
+  "version": "0.1.0",
+  "description": "Douban CLI - browse movies, TV shows, search from terminal | 豆瓣命令行工具",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "douban": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "keywords": ["douban", "cli", "movie", "tv", "豆瓣"],
+  "author": "Marvae",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Marvae/douban-cli.git"
+  },
+  "homepage": "https://github.com/Marvae/douban-cli",
+  "dependencies": {
+    "commander": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
