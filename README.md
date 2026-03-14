@@ -31,6 +31,7 @@ Douban CLI - browse movies, TV shows, search, and movie details from the termina
 - 🗂️ **List / 片单** - Hot douban lists
 - ⚙️ **Config / 配置** - Set default user ID
 - 👋 **Me / 我的** - Quick access to your collection
+- 🔐 **Mark/Rate/Comment** - Authenticated status updates, rating, and short comments
 
 ## Installation / 安装
 
@@ -220,6 +221,30 @@ douban me --wish
 
 douban search "奥本海默" --json
 douban movie 35593344 --json
+```
+
+### Mark / Rate / Comment (需要登录)
+
+```bash
+# 自动提取浏览器 Cookie（dbcl2）后标记
+
+douban mark 1292052 --wish
+douban mark 1292052 --watched
+douban mark 1292052 --watching
+
+# 打分 1-5
+
+douban rate 1292052 --score 5
+
+# 写短评
+
+douban comment 1292052 "值得二刷"
+
+# 批量：默认随机 1-2 秒延迟，可用 --delay 覆盖
+
+douban mark --file ids.txt --wish
+douban rate --file rate.csv --score 5
+douban comment --file comments.csv --delay 1.5
 ```
 
 ## Tech Stack
