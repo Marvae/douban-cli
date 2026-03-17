@@ -1,14 +1,23 @@
 import { Command } from 'commander';
 import { getHotLists } from '../api/index.js';
+import { withErrorHandler } from '../utils/error.js';
+import { withSpinner } from '../utils/spinner.js';
 
 export function registerListCommands(program: Command): void {
   program
     .command('list')
-    .description('Get hot doulist recommendations')
-    .option('-n, --limit <n>', 'Number of results', '20')
-    .option('--json', 'Output as JSON')
-    .action(async (opts) => {
-      const items = await getHotLists(parseInt(opts.limit));
+    .description('获取热门豆列推荐')
+    .option('-n, --limit <n>', '返回数量', '20')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'list',
+      suggestion: '可尝试：douban list -n 10'
+    }, async (opts) => {
+      const items = await withSpinner(
+        '正在获取热门豆列...',
+        () => getHotLists(parseInt(opts.limit, 10)),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
@@ -20,5 +29,5 @@ export function registerListCommands(program: Command): void {
           console.log(`    最近更新: ${item.recent}`);
         });
       }
-    });
+    }));
 }

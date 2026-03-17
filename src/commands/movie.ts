@@ -14,144 +14,364 @@ import {
   getWeekly,
   searchMovies
 } from '../api/index.js';
+import { withErrorHandler } from '../utils/error.js';
+import { withSpinner } from '../utils/spinner.js';
+
+interface TableColumn<Row> {
+  header: string;
+  value: (row: Row, index: number) => string;
+  minWidth?: number;
+}
+
+function getDisplayWidth(text: string): number {
+  let width = 0;
+
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+
+    if (
+      (code >= 0x1100 && code <= 0x115f) ||
+      code === 0x2329 ||
+      code === 0x232a ||
+      (code >= 0x2e80 && code <= 0xa4cf) ||
+      (code >= 0xac00 && code <= 0xd7a3) ||
+      (code >= 0xf900 && code <= 0xfaff) ||
+      (code >= 0xfe10 && code <= 0xfe19) ||
+      (code >= 0xfe30 && code <= 0xfe6f) ||
+      (code >= 0xff00 && code <= 0xff60) ||
+      (code >= 0xffe0 && code <= 0xffe6)
+    ) {
+      width += 2;
+      continue;
+    }
+
+    width += 1;
+  }
+
+  return width;
+}
+
+function padCell(text: string, width: number): string {
+  const padding = Math.max(0, width - getDisplayWidth(text));
+  return text + ' '.repeat(padding);
+}
+
+function renderTable<Row>(rows: Row[], columns: TableColumn<Row>[]): void {
+  if (rows.length === 0) {
+    return;
+  }
+
+  const widths = columns.map((col) => {
+    let maxWidth = Math.max(getDisplayWidth(col.header), col.minWidth ?? 0);
+
+    rows.forEach((row, index) => {
+      const valueWidth = getDisplayWidth(col.value(row, index));
+      if (valueWidth > maxWidth) {
+        maxWidth = valueWidth;
+      }
+    });
+
+    return maxWidth;
+  });
+
+  console.log(columns.map((col, i) => padCell(col.header, widths[i])).join('   '));
+
+  rows.forEach((row, rowIndex) => {
+    console.log(
+      columns
+        .map((col, i) => padCell(col.value(row, rowIndex), widths[i]))
+        .join('   ')
+    );
+  });
+}
+
+function compactNumber(value: number | undefined): string {
+  if (!value || value <= 0) return '-';
+  if (value >= 10000) {
+    const n = Math.round((value / 10000) * 10) / 10;
+    return Number.isInteger(n) ? `${n.toFixed(0)}万` : `${n.toFixed(1)}万`;
+  }
+  return value.toLocaleString();
+}
+
+function normalizeDate(value: string | undefined): string {
+  if (!value) return '-';
+  const trimmed = value.trim();
+
+  const cnMatch = trimmed.match(/(\d{1,2})月(\d{1,2})日?/);
+  if (cnMatch) {
+    return `${cnMatch[1].padStart(2, '0')}-${cnMatch[2].padStart(2, '0')}`;
+  }
+
+  const dashMatch = trimmed.match(/\d{4}[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (dashMatch) {
+    return `${dashMatch[1].padStart(2, '0')}-${dashMatch[2].padStart(2, '0')}`;
+  }
+
+  return trimmed;
+}
+
+function normalizeYear(value: string | undefined): string {
+  if (!value) return '-';
+  const match = value.match(/(19|20)\d{2}/);
+  return match ? match[0] : '-';
+}
+
+function formatTags(values: string[] | undefined): string {
+  if (!values || values.length === 0) return '-';
+  return values.join('/');
+}
+
+function formatRegion(values: string[] | undefined): string {
+  if (!values || values.length === 0) return '-';
+  return values.join('/');
+}
 
 export function registerMovieCommands(program: Command): void {
   program
     .command('hot')
-    .description('Get trending movies or TV shows')
-    .option('--tv', 'Show TV shows instead of movies')
-    .option('-t, --tag <tag>', 'Filter by tag (热门/美剧/日剧/韩剧/国产剧/综艺/最新)', '热门')
-    .option('-n, --limit <n>', 'Number of results', '20')
-    .option('--json', 'Output as JSON')
-    .action(async (opts) => {
+    .description('获取热门电影或剧集')
+    .option('--tv', '显示剧集而非电影')
+    .option('-t, --tag <tag>', '按标签筛选（热门/美剧/日剧/韩剧/国产剧/综艺/最新）', '热门')
+    .option('-n, --limit <n>', '返回数量', '20')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'hot',
+      options: '标签：热门、美剧、日剧、韩剧、国产剧、综艺、最新',
+      suggestion: '可尝试：douban hot -t 热门'
+    }, async (opts) => {
       const type = opts.tv ? 'tv' : 'movie';
-      const items = await getHot(type, opts.tag, parseInt(opts.limit));
+      const items = await withSpinner(
+        `正在获取热门${opts.tv ? '剧集' : '电影'}...`,
+        () => getHot(type, opts.tag, parseInt(opts.limit, 10)),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
       } else {
         console.log(`\n🔥 热门${opts.tv ? '剧集' : '电影'} (${opts.tag})\n`);
-        items.forEach((item, i) => {
-          const rating = item.rate ? `⭐${item.rate}` : '';
-          console.log(`${(i + 1).toString().padStart(2)}. ${item.title} ${rating}`);
-        });
+        renderTable(items, [
+          { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
+          { header: '片名', value: (item) => item.title, minWidth: 18 },
+          { header: '评分', value: (item) => (item.rate && item.rate !== '0' ? item.rate : '-') }
+        ]);
       }
-    });
+    }));
 
   program
-    .command('tv <tag>')
-    .description('Get TV shows by tag (美剧/日剧/韩剧/国产剧/综艺)')
-    .option('-n, --limit <n>', 'Number of results', '20')
-    .option('--json', 'Output as JSON')
-    .action(async (tag, opts) => {
-      const items = await getHot('tv', tag, parseInt(opts.limit));
+    .command('tv [tag]')
+    .description('按标签获取剧集列表（美剧/日剧/韩剧/国产剧/综艺）')
+    .option('-n, --limit <n>', '返回数量', '20')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler((args) => ({
+      command: 'tv',
+      target: `标签: ${String(args[0] || '未指定')}`,
+      options: '标签：美剧、日剧、韩剧、国产剧、综艺',
+      suggestion: '可尝试：douban tv 美剧'
+    }), async (tag, opts) => {
+      if (!tag) {
+        console.log('\n📺 剧集 - 请指定标签\n');
+        console.log('用法: douban tv <标签>\n');
+        console.log('可选标签: 美剧  日剧  韩剧  国产剧  综艺  热门  最新\n');
+        console.log('示例: douban tv 美剧');
+        return;
+      }
+      const items = await withSpinner(
+        `正在获取${tag}剧集...`,
+        () => getHot('tv', tag, parseInt(opts.limit, 10)),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
       } else {
         console.log(`\n📺 ${tag}\n`);
-        items.forEach((item, i) => {
-          const rating = item.rate ? `⭐${item.rate}` : '';
-          console.log(`${(i + 1).toString().padStart(2)}. ${item.title} ${rating}`);
-        });
+        renderTable(items, [
+          { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
+          { header: '片名', value: (item) => item.title, minWidth: 18 },
+          { header: '评分', value: (item) => (item.rate && item.rate !== '0' ? item.rate : '-') }
+        ]);
       }
-    });
+    }));
 
   program
-    .command('rank <genre>')
-    .description('Get top rated movies by genre (科幻/动作/爱情/动画/悬疑...)')
-    .option('-n, --limit <n>', 'Number of results', '20')
-    .option('--json', 'Output as JSON')
-    .action(async (genre, opts) => {
+    .command('rank [genre]')
+    .description('按类型查看高分电影排行（科幻/动作/爱情/动画/悬疑...）')
+    .option('-n, --limit <n>', '返回数量', '20')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler((args) => ({
+      command: 'rank',
+      target: `类型: ${String(args[0] || '未指定')}`,
+      options: `可用类型：${Object.keys(GENRES).join('、')}`,
+      suggestion: '可尝试：douban rank 科幻'
+    }), async (genre, opts) => {
+      if (!genre) {
+        console.log('\n🏆 电影排行 - 请指定类型\n');
+        console.log('用法: douban rank <类型>\n');
+        console.log('可选类型:');
+        const genres = Object.keys(GENRES);
+        const rows = [];
+        for (let i = 0; i < genres.length; i += 6) {
+          rows.push(genres.slice(i, i + 6).join('  '));
+        }
+        rows.forEach(row => console.log(`  ${row}`));
+        console.log('\n示例: douban rank 科幻');
+        return;
+      }
       const typeId = GENRES[genre];
       if (!typeId) {
-        console.error(`Unknown genre: ${genre}`);
-        console.error(`Available: ${Object.keys(GENRES).join(', ')}`);
-        process.exit(1);
+        console.log(`\n❌ 未知类型: ${genre}\n`);
+        console.log('可选类型:');
+        const genres = Object.keys(GENRES);
+        const rows = [];
+        for (let i = 0; i < genres.length; i += 6) {
+          rows.push(genres.slice(i, i + 6).join('  '));
+        }
+        rows.forEach(row => console.log(`  ${row}`));
+        return;
       }
 
-      const items = await getRank(typeId, parseInt(opts.limit));
+      const items = await withSpinner(
+        `正在获取${genre}排行...`,
+        () => getRank(typeId, parseInt(opts.limit, 10)),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
       } else {
         console.log(`\n🏆 ${genre}片排行\n`);
-        items.forEach((item, i) => {
-          console.log(`${(i + 1).toString().padStart(2)}. ${item.title} ⭐${item.score} (${item.vote_count.toLocaleString()}人评价)`);
-        });
+        renderTable(items, [
+          { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
+          { header: '片名', value: (item) => item.title, minWidth: 18 },
+          { header: '年份', value: (item) => normalizeYear(item.release_date) },
+          { header: '类型', value: (item) => formatTags(item.types), minWidth: 14 },
+          { header: '评分', value: (item) => item.score || '-' },
+          { header: '评价', value: (item) => compactNumber(item.vote_count) }
+        ]);
       }
-    });
+    }));
 
   program
     .command('top250')
-    .description('Get Douban Top 250 movies')
-    .option('-n, --limit <n>', 'Number of results', '25')
-    .option('--json', 'Output as JSON')
-    .action(async (opts) => {
-      const items = await getTop250(0, parseInt(opts.limit));
+    .description('获取豆瓣 Top 250 电影')
+    .option('-n, --limit <n>', '返回数量', '25')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'top250',
+      suggestion: '可尝试：douban top250 -n 50'
+    }, async (opts) => {
+      const items = await withSpinner(
+        '正在获取豆瓣 Top 250...',
+        () => getTop250(0, parseInt(opts.limit, 10)),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
       } else {
         console.log('\n🎬 豆瓣 Top 250\n');
-        items.forEach((item, i) => {
-          console.log(`${(i + 1).toString().padStart(2)}. ${item.title} ⭐${item.rating}`);
-        });
+        renderTable(items, [
+          { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
+          { header: '片名', value: (item) => item.title, minWidth: 18 },
+          { header: '评分', value: (item) => item.rating || '-' }
+        ]);
       }
-    });
+    }));
 
   program
     .command('now')
-    .description('Get now playing movies')
-    .option('-c, --city <city>', 'City name (北京/上海/苏州/...)', '北京')
-    .option('--json', 'Output as JSON')
-    .action(async (opts) => {
+    .description('获取正在热映电影')
+    .option('-c, --city <city>', '城市名称（北京/上海/苏州/...）', '北京')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler((args) => ({
+      command: 'now',
+      target: `城市: ${String((args[0] as { city?: string }).city ?? '')}`,
+      suggestion: '可尝试：douban now -c 上海'
+    }), async (opts) => {
       const cityCode = CITIES[opts.city] || opts.city;
-      const items = await getNowPlaying(cityCode);
+      const items = await withSpinner(
+        `正在获取${opts.city}热映电影...`,
+        () => getNowPlaying(cityCode),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
       } else {
         console.log(`\n🎬 ${opts.city}正在热映\n`);
-        items.forEach((item, i) => {
-          const score = item.score !== '-' ? `⭐${item.score}` : '';
-          console.log(`${(i + 1).toString().padStart(2)}. ${item.title} ${score}`);
-        });
+        renderTable(items, [
+          { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
+          { header: '片名', value: (item) => item.title, minWidth: 18 },
+          { header: '评分', value: (item) => (item.score && item.score !== '-' ? item.score : '-') }
+        ]);
       }
-    });
+    }));
 
   program
-    .command('search <keyword>')
-    .description('Search movies by keyword')
-    .option('-s, --start <n>', 'Start offset', '0')
-    .option('-n, --limit <n>', 'Number of results', '20')
-    .option('--json', 'Output as JSON')
-    .action(async (keyword, opts) => {
-      const items = await searchMovies(keyword, parseInt(opts.start), parseInt(opts.limit));
+    .command('search [keyword]')
+    .description('按关键词搜索电影')
+    .option('-s, --start <n>', '起始偏移', '0')
+    .option('-n, --limit <n>', '返回数量', '20')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler((args) => ({
+      command: 'search',
+      target: `关键词: ${String(args[0] || '未指定')}`,
+      suggestion: '可尝试：douban search 沙丘'
+    }), async (keyword, opts) => {
+      if (!keyword) {
+        console.log('\n🔍 搜索电影 - 请指定关键词\n');
+        console.log('用法: douban search <关键词>\n');
+        console.log('示例: douban search 沙丘');
+        return;
+      }
+      const items = await withSpinner(
+        `正在搜索“${keyword}”...`,
+        () => searchMovies(keyword, parseInt(opts.start, 10), parseInt(opts.limit, 10)),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
       } else {
         console.log(`\n🔍 搜索: ${keyword}\n`);
         if (items.length === 0) {
-          console.log('No results found.');
+          console.log('未找到相关结果。');
           return;
         }
-        items.forEach((item, i) => {
-          const rating = item.rating && item.rating !== '-' ? `⭐${item.rating}` : '';
-          const year = item.year ? ` (${item.year})` : '';
-          console.log(`${(i + 1).toString().padStart(2)}. ${item.title}${year} ${rating}`.trim());
-          if (item.id) console.log(`    ID: ${item.id}`);
-        });
+
+        renderTable(items, [
+          { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
+          { header: '片名', value: (item) => item.title, minWidth: 18 },
+          { header: '年份', value: (item) => normalizeYear(item.year) },
+          { header: '评分', value: (item) => (item.rating && item.rating !== '-' ? item.rating : '-') },
+          { header: 'ID', value: (item) => item.id || '-' }
+        ]);
       }
-    });
+    }));
 
   program
-    .command('movie <id>')
-    .description('Get movie detail by subject id')
-    .option('--json', 'Output as JSON')
-    .action(async (id, opts) => {
-      const detail = await getMovieDetail(id);
+    .command('movie [id]')
+    .description('按电影 ID 获取详情')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler((args) => ({
+      command: 'movie',
+      target: `ID: ${String(args[0] || '未指定')}`,
+      suggestion: '确认 ID 是否正确，可使用 douban search 搜索'
+    }), async (id, opts) => {
+      if (!id) {
+        console.log('\n🎬 电影详情 - 请指定 ID\n');
+        console.log('用法: douban movie <ID>\n');
+        console.log('获取 ID: douban search <关键词>\n');
+        console.log('示例: douban movie 1292052');
+        return;
+      }
+      const detail = await withSpinner(
+        '正在获取电影详情...',
+        () => getMovieDetail(id),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(detail, null, 2));
@@ -164,14 +384,28 @@ export function registerMovieCommands(program: Command): void {
         console.log(`\n简介:\n${detail.summary || '-'}`);
         console.log(`\n链接: ${detail.url}`);
       }
-    });
+    }));
 
   program
-    .command('rating <id>')
-    .description('Get movie rating distribution')
-    .option('--json', 'Output as JSON')
-    .action(async (id, opts) => {
-      const stats = await getRatingStats(id);
+    .command('rating [id]')
+    .description('获取电影评分分布')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler((args) => ({
+      command: 'rating',
+      target: `ID: ${String(args[0] || '未指定')}`,
+      suggestion: '可尝试：douban rating 1292052'
+    }), async (id, opts) => {
+      if (!id) {
+        console.log('\n⭐ 评分分布 - 请指定电影 ID\n');
+        console.log('用法: douban rating <ID>\n');
+        console.log('示例: douban rating 1292052');
+        return;
+      }
+      const stats = await withSpinner(
+        '正在获取评分分布...',
+        () => getRatingStats(id),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(stats, null, 2));
@@ -198,62 +432,100 @@ export function registerMovieCommands(program: Command): void {
           });
         }
       }
-    });
+    }));
 
   program
     .command('coming')
-    .description('Get coming soon movies')
-    .option('-n, --limit <n>', 'Number of results', '20')
-    .option('--json', 'Output as JSON')
-    .action(async (opts) => {
-      const items = await getComing(parseInt(opts.limit));
+    .description('获取即将上映电影')
+    .option('-n, --limit <n>', '返回数量', '20')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'coming',
+      suggestion: '可尝试：douban coming -n 30'
+    }, async (opts) => {
+      const items = await withSpinner(
+        '正在获取即将上映电影...',
+        () => getComing(parseInt(opts.limit, 10)),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
       } else {
         console.log('\n📅 即将上映\n');
-        items.forEach((item, i) => {
-          console.log(`${(i + 1).toString().padStart(2)}. ${item.title} (${item.release_date})`);
-          console.log(`    类型: ${item.types.join(' / ') || '-'}`);
-          console.log(`    地区: ${item.regions.join(' / ') || '-'}`);
-          console.log(`    想看: ${item.wish_count}`);
-        });
+        renderTable(items, [
+          { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
+          { header: '片名', value: (item) => item.title, minWidth: 18 },
+          { header: '日期', value: (item) => normalizeDate(item.release_date) },
+          { header: '类型', value: (item) => formatTags(item.types), minWidth: 16 },
+          { header: '地区', value: (item) => formatRegion(item.regions), minWidth: 10 },
+          { header: '想看', value: (item) => compactNumber(item.wish_count) }
+        ]);
       }
-    });
+    }));
 
   program
     .command('weekly')
-    .description('Get weekly reputation chart')
-    .option('-n, --limit <n>', 'Number of results', '10')
-    .option('--json', 'Output as JSON')
-    .action(async (opts) => {
-      const items = await getWeekly(parseInt(opts.limit));
+    .description('获取一周口碑榜')
+    .option('-n, --limit <n>', '返回数量', '10')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'weekly',
+      suggestion: '可尝试：douban weekly'
+    }, async (opts) => {
+      const items = await withSpinner(
+        '正在获取一周口碑榜...',
+        () => getWeekly(parseInt(opts.limit, 10)),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
       } else {
         console.log('\n📈 一周口碑榜\n');
         items.forEach((item) => {
-          console.log(`${item.rank.toString().padStart(2)}. ${item.title} [${item.trend}]`);
+          let trendDisplay = '—';
+          if (item.trend.startsWith('up')) {
+            const num = item.trend.replace('up ', '').trim();
+            trendDisplay = `🔺${num}`;
+          } else if (item.trend.startsWith('down')) {
+            const num = item.trend.replace('down ', '').trim();
+            trendDisplay = `🔻${num}`;
+          }
+          console.log(`${item.rank.toString().padStart(2)}. ${item.title} ${trendDisplay}`);
         });
       }
-    });
+    }));
 
   program
-    .command('reviews <movieId>')
-    .description('Get hot comments for a movie by subject id')
-    .option('-s, --start <n>', 'Start offset', '0')
-    .option('-n, --limit <n>', 'Number of results', '20')
-    .option('--json', 'Output as JSON')
-    .action(async (movieId, opts) => {
-      const items = await getReviews(movieId, parseInt(opts.start), parseInt(opts.limit));
+    .command('reviews [movieId]')
+    .description('按电影 ID 获取热门影评')
+    .option('-s, --start <n>', '起始偏移', '0')
+    .option('-n, --limit <n>', '返回数量', '20')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler((args) => ({
+      command: 'reviews',
+      target: `ID: ${String(args[0] || '未指定')}`,
+      suggestion: '可尝试：douban reviews 1292052 -n 10'
+    }), async (movieId, opts) => {
+      if (!movieId) {
+        console.log('\n📝 热门影评 - 请指定电影 ID\n');
+        console.log('用法: douban reviews <ID>\n');
+        console.log('示例: douban reviews 1292052');
+        return;
+      }
+      const items = await withSpinner(
+        '正在获取热门影评...',
+        () => getReviews(movieId, parseInt(opts.start, 10), parseInt(opts.limit, 10)),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
       } else {
         console.log(`\n💬 电影短评 ${movieId}\n`);
         if (items.length === 0) {
-          console.log('No reviews found.');
+          console.log('未找到影评。');
           return;
         }
         items.forEach((item, i) => {
@@ -261,18 +533,32 @@ export function registerMovieCommands(program: Command): void {
           console.log(`    ${item.content}`);
         });
       }
-    });
+    }));
 
   program
-    .command('comments <movieId>')
-    .description('Get short comments/reviews for a movie')
-    .option('--latest', 'Sort by latest instead of hot')
-    .option('-s, --start <n>', 'Start offset', '0')
-    .option('-n, --limit <n>', 'Number of results', '10')
-    .option('--json', 'Output as JSON')
-    .action(async (movieId, opts) => {
+    .command('comments [movieId]')
+    .description('按电影 ID 获取短评')
+    .option('--latest', '按最新排序（默认按热门）')
+    .option('-s, --start <n>', '起始偏移', '0')
+    .option('-n, --limit <n>', '返回数量', '10')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler((args) => ({
+      command: 'comments',
+      target: `ID: ${String(args[0] || '未指定')}`,
+      suggestion: '可尝试：douban comments 1292052 --latest'
+    }), async (movieId, opts) => {
+      if (!movieId) {
+        console.log('\n💬 短评 - 请指定电影 ID\n');
+        console.log('用法: douban comments <ID>\n');
+        console.log('示例: douban comments 1292052');
+        return;
+      }
       const orderBy = opts.latest ? 'latest' : 'hot';
-      const items = await getComments(movieId, orderBy, parseInt(opts.start), parseInt(opts.limit));
+      const items = await withSpinner(
+        `正在获取${opts.latest ? '最新' : '热门'}短评...`,
+        () => getComments(movieId, orderBy, parseInt(opts.start, 10), parseInt(opts.limit, 10)),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
@@ -289,5 +575,5 @@ export function registerMovieCommands(program: Command): void {
           console.log(`    ${item.time}\n`);
         });
       }
-    });
+    }));
 }

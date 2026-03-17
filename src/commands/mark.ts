@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { ensureAuth } from '../auth.js';
 import { BASE, UA, fetchHtml } from '../api/common.js';
+import { withErrorHandler } from '../utils/error.js';
+import { withSpinner } from '../utils/spinner.js';
 
 type Interest = 'wish' | 'collect' | 'do';
 
@@ -32,7 +34,7 @@ function isNumericId(value: string): boolean {
 
 function parseNumericId(value: string): string {
   const id = value.trim();
-  if (!isNumericId(id)) throw new Error(`Invalid subject id: ${value}`);
+  if (!isNumericId(id)) throw new Error(`无效条目 ID: ${value}`);
   return id;
 }
 
@@ -40,7 +42,7 @@ function parseDelaySeconds(value: string | undefined): number {
   if (!value) return NaN;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error('--delay must be a non-negative number');
+    throw new Error('--delay 必须是非负数字');
   }
   return parsed;
 }
@@ -71,7 +73,7 @@ function parseIdFile(filePath: string): BatchItem[] {
 function parseRateFile(filePath: string): BatchItem[] {
   return readBatchLines(filePath).map((line) => {
     const match = line.match(/^(\d+)\s*[,\t\s]\s*([1-5])\s*$/);
-    if (!match) throw new Error(`Invalid rate line: ${line}. Expected: <id>,<score>`);
+    if (!match) throw new Error(`评分文件格式错误: ${line}。应为 <id>,<score>`);
     return { id: parseNumericId(match[1]), score: Number(match[2]) };
   });
 }
@@ -83,12 +85,12 @@ function parseCommentFile(filePath: string): BatchItem[] {
     const splitIndex = commaIndex >= 0 && tabIndex >= 0 ? Math.min(commaIndex, tabIndex) : Math.max(commaIndex, tabIndex);
 
     if (splitIndex <= 0) {
-      throw new Error(`Invalid comment line: ${line}. Expected: <id>,<comment> or <id>\t<comment>`);
+      throw new Error(`评论文件格式错误: ${line}。应为 <id>,<comment> 或 <id>\t<comment>`);
     }
 
     const id = parseNumericId(line.slice(0, splitIndex).trim());
     const text = line.slice(splitIndex + 1).trim();
-    if (!text) throw new Error(`Comment text is empty for id=${id}`);
+    if (!text) throw new Error(`ID=${id} 的评论为空`);
     return { id, text };
   });
 }
@@ -117,7 +119,7 @@ async function resolveCk(existing: string | undefined, id: string, cookieHeader:
   const jsMatch = html.match(/[?&]ck=([A-Za-z0-9]+)/);
   if (jsMatch?.[1]) return jsMatch[1];
 
-  throw new Error('Failed to resolve ck token from subject page');
+  throw new Error('无法从条目页面解析 ck token');
 }
 
 async function submitInterest(
@@ -161,11 +163,11 @@ async function submitInterest(
   }
 
   if (!parsed || typeof parsed.r !== 'number') {
-    throw new Error(`Unexpected response: ${text.slice(0, 120)}`);
+    throw new Error(`返回结果异常: ${text.slice(0, 120)}`);
   }
 
   if (parsed.r !== 0) {
-    throw new Error(parsed.msg || `Douban API error code=${parsed.code ?? 'unknown'}`);
+    throw new Error(parsed.msg || `豆瓣接口错误 code=${parsed.code ?? 'unknown'}`);
   }
 
   return parsed;
@@ -174,7 +176,7 @@ async function submitInterest(
 function selectInterestFromOptions(opts: { wish?: boolean; watched?: boolean; watching?: boolean }): Interest {
   const selected = [opts.wish, opts.watched, opts.watching].filter(Boolean).length;
   if (selected !== 1) {
-    throw new Error('Choose exactly one of --wish, --watched, --watching');
+    throw new Error('必须且只能选择 --wish、--watched、--watching 之一');
   }
   if (opts.wish) return 'wish';
   if (opts.watching) return 'do';
@@ -184,25 +186,33 @@ function selectInterestFromOptions(opts: { wish?: boolean; watched?: boolean; wa
 export function registerMarkCommands(program: Command): void {
   program
     .command('mark [id]')
-    .description('Mark movie status (wish/watched/watching), requires login')
-    .option('--wish', 'Mark as wish list')
-    .option('--watched', 'Mark as watched')
-    .option('--watching', 'Mark as currently watching')
-    .option('--file <path>', 'Batch mode: one subject id per line')
-    .option('--delay <seconds>', 'Delay between batch requests; default random 1-2 seconds')
-    .option('--json', 'Output as JSON')
-    .action(async (id: string | undefined, opts) => {
+    .description('标记电影状态（想看/看过/在看），需要登录')
+    .option('--wish', '标记为“想看”')
+    .option('--watched', '标记为“看过”')
+    .option('--watching', '标记为“在看”')
+    .option('--file <path>', '批量模式：每行一个条目 ID')
+    .option('--delay <seconds>', '批量请求间隔（秒），默认随机 1-2 秒')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'mark',
+      options: '状态：--wish / --watched / --watching（三选一）',
+      suggestion: '可尝试：douban mark 1292052 --wish'
+    }, async (id: string | undefined, opts) => {
       const interest = selectInterestFromOptions(opts);
       const delaySeconds = parseDelaySeconds(opts.delay);
       const items = opts.file ? parseIdFile(String(opts.file)) : [{ id: parseNumericId(id || '') }];
 
-      const auth = await ensureAuth();
+      const auth = await withSpinner('正在检查登录状态...', () => ensureAuth(), !opts.json);
       const results: Array<{ id: string; ok: boolean; error?: string }> = [];
 
       for (let i = 0; i < items.length; i += 1) {
         const item = items[i];
         try {
-          await submitInterest(item.id, { interest }, auth.cookies, auth.ck);
+          await withSpinner(
+            `正在标记 ${item.id}...`,
+            () => submitInterest(item.id, { interest }, auth.cookies, auth.ck),
+            !opts.json
+          );
           results.push({ id: item.id, ok: true });
           if (!opts.json) console.log(`✓ ${item.id} -> ${interest}`);
         } catch (error) {
@@ -223,28 +233,32 @@ export function registerMarkCommands(program: Command): void {
       const okCount = results.filter((r) => r.ok).length;
       console.log(`done: ${okCount}/${results.length}`);
       if (okCount !== results.length) process.exitCode = 1;
-    });
+    }));
 
   program
     .command('rate [id]')
-    .description('Rate movie (1-5), requires login')
-    .option('--score <score>', 'Score 1-5 for single mode')
-    .option('--file <path>', 'Batch mode: <id>,<score> per line')
-    .option('--delay <seconds>', 'Delay between batch requests; default random 1-2 seconds')
-    .option('--json', 'Output as JSON')
-    .action(async (id: string | undefined, opts) => {
+    .description('给电影评分（1-5），需要登录')
+    .option('--score <score>', '单条模式评分（1-5）')
+    .option('--file <path>', '批量模式：每行 <id>,<score>')
+    .option('--delay <seconds>', '批量请求间隔（秒），默认随机 1-2 秒')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'rate',
+      options: '评分范围：1-5',
+      suggestion: '可尝试：douban rate 1292052 --score 5'
+    }, async (id: string | undefined, opts) => {
       const delaySeconds = parseDelaySeconds(opts.delay);
       const singleScore = Number(opts.score);
 
       if (!opts.file && (!isNumericId(id || '') || !Number.isInteger(singleScore) || singleScore < 1 || singleScore > 5)) {
-        throw new Error('Single mode: rate <id> --score <1-5>');
+        throw new Error('单条模式请使用：rate <id> --score <1-5>');
       }
 
       const items = opts.file
         ? parseRateFile(String(opts.file))
         : [{ id: parseNumericId(id || ''), score: singleScore }];
 
-      const auth = await ensureAuth();
+      const auth = await withSpinner('正在检查登录状态...', () => ensureAuth(), !opts.json);
       const results: Array<{ id: string; score: number; ok: boolean; error?: string }> = [];
 
       for (let i = 0; i < items.length; i += 1) {
@@ -252,7 +266,11 @@ export function registerMarkCommands(program: Command): void {
         const score = item.score as number;
 
         try {
-          await submitInterest(item.id, { interest: 'collect', rating: score }, auth.cookies, auth.ck);
+          await withSpinner(
+            `正在提交评分 ${item.id}...`,
+            () => submitInterest(item.id, { interest: 'collect', rating: score }, auth.cookies, auth.ck),
+            !opts.json
+          );
           results.push({ id: item.id, score, ok: true });
           if (!opts.json) console.log(`✓ ${item.id} -> score ${score}`);
         } catch (error) {
@@ -273,33 +291,40 @@ export function registerMarkCommands(program: Command): void {
       const okCount = results.filter((r) => r.ok).length;
       console.log(`done: ${okCount}/${results.length}`);
       if (okCount !== results.length) process.exitCode = 1;
-    });
+    }));
 
   program
     .command('comment [id] [text]')
-    .description('Post short comment, requires login')
-    .option('--file <path>', 'Batch mode: <id>,<comment> per line')
-    .option('--delay <seconds>', 'Delay between batch requests; default random 1-2 seconds')
-    .option('--json', 'Output as JSON')
-    .action(async (id: string | undefined, text: string | undefined, opts) => {
+    .description('发布短评，需要登录')
+    .option('--file <path>', '批量模式：每行 <id>,<comment>')
+    .option('--delay <seconds>', '批量请求间隔（秒），默认随机 1-2 秒')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'comment',
+      suggestion: '可尝试：douban comment 1292052 "值得重看"'
+    }, async (id: string | undefined, text: string | undefined, opts) => {
       const delaySeconds = parseDelaySeconds(opts.delay);
 
       if (!opts.file && (!isNumericId(id || '') || !text || !text.trim())) {
-        throw new Error('Single mode: comment <id> "short comment"');
+        throw new Error('单条模式请使用：comment <id> "短评内容"');
       }
 
       const items = opts.file
         ? parseCommentFile(String(opts.file))
         : [{ id: parseNumericId(id || ''), text: String(text).trim() }];
 
-      const auth = await ensureAuth();
+      const auth = await withSpinner('正在检查登录状态...', () => ensureAuth(), !opts.json);
       const results: Array<{ id: string; ok: boolean; error?: string }> = [];
 
       for (let i = 0; i < items.length; i += 1) {
         const item = items[i];
 
         try {
-          await submitInterest(item.id, { interest: 'collect', comment: item.text }, auth.cookies, auth.ck);
+          await withSpinner(
+            `正在发布短评 ${item.id}...`,
+            () => submitInterest(item.id, { interest: 'collect', comment: item.text }, auth.cookies, auth.ck),
+            !opts.json
+          );
           results.push({ id: item.id, ok: true });
           if (!opts.json) console.log(`✓ ${item.id} -> commented`);
         } catch (error) {
@@ -320,5 +345,5 @@ export function registerMarkCommands(program: Command): void {
       const okCount = results.filter((r) => r.ok).length;
       console.log(`done: ${okCount}/${results.length}`);
       if (okCount !== results.length) process.exitCode = 1;
-    });
+    }));
 }

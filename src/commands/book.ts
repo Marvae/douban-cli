@@ -1,19 +1,28 @@
 import { Command } from 'commander';
 import { getBookHot, getBookInfo, searchBooks } from '../api/index.js';
+import { withErrorHandler } from '../utils/error.js';
+import { withSpinner } from '../utils/spinner.js';
 
 export function registerBookCommands(program: Command): void {
   const book = program
     .command('book')
-    .description('Douban book commands');
+    .description('豆瓣书籍相关命令');
 
   book
     .command('hot')
-    .description('Get hot books from Top250')
-    .option('-s, --start <n>', 'Start offset', '0')
-    .option('-n, --limit <n>', 'Number of results', '20')
-    .option('--json', 'Output as JSON')
-    .action(async (opts) => {
-      const items = await getBookHot(parseInt(opts.start), parseInt(opts.limit));
+    .description('获取热门书籍（Top250）')
+    .option('-s, --start <n>', '起始偏移', '0')
+    .option('-n, --limit <n>', '返回数量', '20')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'book hot',
+      suggestion: '可尝试：douban book hot -n 30'
+    }, async (opts) => {
+      const items = await withSpinner(
+        '正在获取热门书籍...',
+        () => getBookHot(parseInt(opts.start, 10), parseInt(opts.limit, 10)),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
@@ -24,23 +33,31 @@ export function registerBookCommands(program: Command): void {
           console.log(`    ${item.meta}`);
         });
       }
-    });
+    }));
 
   book
     .command('search <keyword>')
-    .description('Search books by keyword')
-    .option('-s, --start <n>', 'Start offset', '0')
-    .option('-n, --limit <n>', 'Number of results', '20')
-    .option('--json', 'Output as JSON')
-    .action(async (keyword, opts) => {
-      const items = await searchBooks(keyword, parseInt(opts.start), parseInt(opts.limit));
+    .description('按关键词搜索书籍')
+    .option('-s, --start <n>', '起始偏移', '0')
+    .option('-n, --limit <n>', '返回数量', '20')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler((args) => ({
+      command: 'book search',
+      target: `关键词: ${String(args[0])}`,
+      suggestion: '可尝试：douban book search 三体'
+    }), async (keyword, opts) => {
+      const items = await withSpinner(
+        `正在搜索书籍“${keyword}”...`,
+        () => searchBooks(keyword, parseInt(opts.start, 10), parseInt(opts.limit, 10)),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
       } else {
         console.log(`\n📖 搜索书籍: ${keyword}\n`);
         if (items.length === 0) {
-          console.log('No results found.');
+          console.log('未找到相关结果。');
           return;
         }
         items.forEach((item, i) => {
@@ -49,14 +66,22 @@ export function registerBookCommands(program: Command): void {
           console.log(`    ID: ${item.id}`);
         });
       }
-    });
+    }));
 
   book
     .command('info <id>')
-    .description('Get book detail by subject id')
-    .option('--json', 'Output as JSON')
-    .action(async (id, opts) => {
-      const detail = await getBookInfo(id);
+    .description('按书籍 ID 获取详情')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler((args) => ({
+      command: 'book info',
+      target: `ID: ${String(args[0])}`,
+      suggestion: '确认 ID 是否正确，可先运行 douban book search <关键词>'
+    }), async (id, opts) => {
+      const detail = await withSpinner(
+        '正在获取书籍详情...',
+        () => getBookInfo(id),
+        !opts.json
+      );
 
       if (opts.json) {
         console.log(JSON.stringify(detail, null, 2));
@@ -73,5 +98,5 @@ export function registerBookCommands(program: Command): void {
         console.log(`\n简介:\n${detail.summary}`);
         console.log(`\n链接: ${detail.url}`);
       }
-    });
+    }));
 }
