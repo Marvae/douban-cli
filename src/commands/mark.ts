@@ -4,6 +4,7 @@ import { ensureAuth } from '../auth.js';
 import { BASE, UA, fetchHtml } from '../api/common.js';
 import { unmarkSubject } from '../api/index.js';
 import { withErrorHandler } from '../utils/error.js';
+import { formEncode, isNumericId } from '../utils/parsing.js';
 import { withSpinner } from '../utils/spinner.js';
 
 type Interest = 'wish' | 'collect' | 'do';
@@ -28,10 +29,7 @@ interface BatchItem {
 }
 
 const INTEREST_PATH = (id: string) => `${BASE}/j/subject/${id}/interest`;
-
-function isNumericId(value: string): boolean {
-  return /^\d+$/.test(value.trim());
-}
+const FETCH_TIMEOUT_MS = 30000;
 
 function parseNumericId(value: string): string {
   const id = value.trim();
@@ -96,15 +94,6 @@ function parseCommentFile(filePath: string): BatchItem[] {
   });
 }
 
-function formEncode(data: Record<string, string>): string {
-  const body = new URLSearchParams();
-  for (const [key, value] of Object.entries(data)) {
-    if (value === '') continue;
-    body.set(key, value);
-  }
-  return body.toString();
-}
-
 async function resolveCk(existing: string | undefined, id: string, cookieHeader: string): Promise<string> {
   if (existing) return existing;
 
@@ -147,14 +136,17 @@ async function submitInterest(
       'X-Requested-With': 'XMLHttpRequest',
       'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
     },
-    body: form
+    body: form,
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
   });
 
   const text = await res.text();
   let parsed: InterestResponse | null = null;
   try {
     parsed = JSON.parse(text) as InterestResponse;
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[mark] 解析兴趣接口 JSON 失败: ${message}`);
     parsed = null;
   }
 

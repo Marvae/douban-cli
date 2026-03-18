@@ -10,6 +10,7 @@ import {
   unfollowUser
 } from '../api/index.js';
 import { withErrorHandler } from '../utils/error.js';
+import { isNumericId, parsePositiveInt } from '../utils/parsing.js';
 import { withSpinner } from '../utils/spinner.js';
 
 type ExportFormat = 'json' | 'csv';
@@ -19,19 +20,6 @@ interface StatResult {
   total: number;
   byMonth: number[];
   avgScore: string;
-}
-
-function parsePositiveInt(value: string | undefined, optionName: string, fallback: number): number {
-  if (typeof value === 'undefined') return fallback;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${optionName} 必须是正整数`);
-  }
-  return parsed;
-}
-
-function isNumericId(value: string): boolean {
-  return /^\d+$/.test(value.trim());
 }
 
 function parseMovieId(value: string): string {
@@ -118,6 +106,19 @@ function parseExportFormat(value: string | undefined): ExportFormat {
   const format = (value || 'json').toLowerCase();
   if (format === 'json' || format === 'csv') return format;
   throw new Error('--format 仅支持 json 或 csv');
+}
+
+function parseDelaySeconds(value: string | undefined, fallback: number): number {
+  if (typeof value === 'undefined') return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error('--delay 必须是非负数字');
+  }
+  return parsed;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function registerSocialCommands(program: Command): void {
@@ -239,21 +240,43 @@ export function registerSocialCommands(program: Command): void {
     .option('-o, --output <path>', '输出文件路径', 'douban-export.json')
     .option('-f, --format <format>', '导出格式：json/csv', 'json')
     .option('-n, --limit <n>', '导出数量上限', '1000')
+    .option('--delay <seconds>', '批量请求间隔（秒）', '1')
     .action(withErrorHandler({
       command: 'export',
       suggestion: '可尝试：douban export --format csv -o records.csv'
     }, async (opts) => {
       const format = parseExportFormat(opts.format);
       const limit = parsePositiveInt(opts.limit, '--limit', 1000);
+      const delaySeconds = parseDelaySeconds(opts.delay, 1);
+      const delayMs = Math.round(delaySeconds * 1000);
 
       const auth = await withSpinner('正在检查登录状态...', () => ensureAuth(), true);
       const me = await withSpinner('正在识别当前用户...', () => getCurrentUserProfile(auth.cookies), true);
 
-      const [collect, wish, doing] = await Promise.all([
-        withSpinner('正在获取看过记录...', () => getCollectionRecords(me.id, 'collect', limit, auth.cookies), true),
-        withSpinner('正在获取想看记录...', () => getCollectionRecords(me.id, 'wish', limit, auth.cookies), true),
-        withSpinner('正在获取在看记录...', () => getCollectionRecords(me.id, 'do', limit, auth.cookies), true)
-      ]);
+      const tasks: Array<{ status: 'collect' | 'wish' | 'do'; text: string }> = [
+        { status: 'collect', text: '正在获取看过记录...' },
+        { status: 'wish', text: '正在获取想看记录...' },
+        { status: 'do', text: '正在获取在看记录...' }
+      ];
+
+      const bucket = new Map<'collect' | 'wish' | 'do', Awaited<ReturnType<typeof getCollectionRecords>>>();
+      for (let i = 0; i < tasks.length; i += 1) {
+        const task = tasks[i];
+        const items = await withSpinner(
+          task.text,
+          () => getCollectionRecords(me.id, task.status, limit, auth.cookies),
+          true
+        );
+        bucket.set(task.status, items);
+
+        if (delayMs > 0 && i < tasks.length - 1) {
+          await sleep(delayMs);
+        }
+      }
+
+      const collect = bucket.get('collect') || [];
+      const wish = bucket.get('wish') || [];
+      const doing = bucket.get('do') || [];
 
       const merged = [...collect, ...wish, ...doing];
 
@@ -269,6 +292,7 @@ export function registerSocialCommands(program: Command): void {
   program
     .command('follow [userId]')
     .description('关注用户 [需登录]')
+    .option('--delay <seconds>', '请求前延迟（秒）', '0')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
       command: 'follow',
@@ -282,7 +306,13 @@ export function registerSocialCommands(program: Command): void {
         console.log('示例: douban follow USER_ID');
         return;
       }
+      const delaySeconds = parseDelaySeconds(opts.delay, 0);
+      const delayMs = Math.round(delaySeconds * 1000);
+
       const auth = await withSpinner('正在检查登录状态...', () => ensureAuth(), !opts.json);
+      if (delayMs > 0) {
+        await withSpinner(`等待 ${delaySeconds} 秒后提交...`, () => sleep(delayMs), !opts.json);
+      }
       await withSpinner('正在关注用户...', () => followUser(String(userId), auth.cookies, auth.ck), !opts.json);
 
       if (opts.json) {
@@ -295,6 +325,7 @@ export function registerSocialCommands(program: Command): void {
   program
     .command('unfollow [userId]')
     .description('取消关注用户 [需登录]')
+    .option('--delay <seconds>', '请求前延迟（秒）', '0')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
       command: 'unfollow',
@@ -307,7 +338,13 @@ export function registerSocialCommands(program: Command): void {
         console.log('示例: douban unfollow USER_ID');
         return;
       }
+      const delaySeconds = parseDelaySeconds(opts.delay, 0);
+      const delayMs = Math.round(delaySeconds * 1000);
+
       const auth = await withSpinner('正在检查登录状态...', () => ensureAuth(), !opts.json);
+      if (delayMs > 0) {
+        await withSpinner(`等待 ${delaySeconds} 秒后提交...`, () => sleep(delayMs), !opts.json);
+      }
       await withSpinner('正在取消关注...', () => unfollowUser(String(userId), auth.cookies, auth.ck), !opts.json);
 
       if (opts.json) {

@@ -124,8 +124,9 @@ export async function getMovieDetail(id: string): Promise<MovieDetail> {
     const html = await fetchHtml(subjectUrl, { Referer: BASE });
     const parsed = parseMovieDetailFromHtml(movieId, html);
     if (parsed) return parsed;
-  } catch {
-    // Continue with fallback endpoints.
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[movie] 主页面解析失败，进入回退逻辑: ${message}`);
   }
 
   const detail: MovieDetail = {
@@ -158,8 +159,9 @@ export async function getMovieDetail(id: string): Promise<MovieDetail> {
       if (Array.isArray(subject.actors)) detail.actors = subject.actors.map((name) => cleanText(name));
       if (subject.url) detail.url = subject.url;
     }
-  } catch {
-    // Ignore and continue with mobile API fallback.
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[movie] subject_abstract 回退失败: ${message}`);
   }
 
   try {
@@ -188,8 +190,9 @@ export async function getMovieDetail(id: string): Promise<MovieDetail> {
     }
     if (mobile.intro) detail.summary = cleanText(mobile.intro);
     if (mobile.url) detail.url = mobile.url;
-  } catch {
-    // No more fallback source.
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[movie] mobile API 回退失败: ${message}`);
   }
 
   if (!detail.title) throw new Error(`Failed to fetch movie detail for id=${movieId}`);
@@ -232,18 +235,35 @@ export const GENRES: Record<string, number> = {
  * Get Top250
  */
 export async function getTop250(start = 0, limit = 25): Promise<{ title: string; rating: string; url: string }[]> {
-  const html = await fetchHtml(`${BASE}/top250?start=${start}`);
   const results: { title: string; rating: string; url: string }[] = [];
-
   const itemRegex = /<div class="item">[\s\S]*?<span class="title">([^<]+)<\/span>[\s\S]*?<span class="rating_num"[^>]*>([^<]+)<\/span>[\s\S]*?href="([^"]+)"/g;
-  let match;
-  while ((match = itemRegex.exec(html)) !== null && results.length < limit) {
-    results.push({
-      title: match[1],
-      rating: match[2],
-      url: match[3]
-    });
+
+  const seen = new Set<string>();
+  let pageStart = Math.max(0, start);
+
+  while (results.length < limit) {
+    const html = await fetchHtml(`${BASE}/top250?start=${pageStart}`);
+
+    let addedThisPage = 0;
+    let match;
+    while ((match = itemRegex.exec(html)) !== null && results.length < limit) {
+      const itemUrl = match[3];
+      if (seen.has(itemUrl)) continue;
+      seen.add(itemUrl);
+      addedThisPage += 1;
+
+      results.push({
+        title: match[1],
+        rating: match[2],
+        url: itemUrl
+      });
+    }
+
+    itemRegex.lastIndex = 0;
+    if (addedThisPage === 0) break;
+    pageStart += 25;
   }
+
   return results;
 }
 

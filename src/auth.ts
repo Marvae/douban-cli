@@ -72,7 +72,8 @@ function decryptCache(payload: EncryptedAuthCache): AuthSession | null {
     if (!parsed || typeof parsed.dbcl2 !== 'string' || !parsed.dbcl2) return null;
     if (typeof parsed.cookies !== 'string' || !parsed.cookies.includes('dbcl2=')) return null;
     return parsed;
-  } catch {
+  } catch (error) {
+    reportRecoverableError('解密登录缓存失败', error);
     return null;
   }
 }
@@ -87,7 +88,8 @@ function readAuthCache(): AuthSession | null {
 
     const raw = JSON.parse(readFileSync(AUTH_CACHE_PATH, 'utf8')) as EncryptedAuthCache;
     return decryptCache(raw);
-  } catch {
+  } catch (error) {
+    reportRecoverableError('读取登录缓存失败', error);
     return null;
   }
 }
@@ -149,6 +151,11 @@ type PuppeteerLaunch = (options?: PuppeteerLaunchOptions) => Promise<PuppeteerBr
 
 type BrowserName = 'chrome' | 'edge' | 'firefox' | 'safari';
 
+function reportRecoverableError(context: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[auth] ${context}: ${message}`);
+}
+
 function normalizeBrowserSource(source: string): string {
   const lower = source.trim().toLowerCase();
   if (!lower) return 'Browser';
@@ -170,8 +177,8 @@ async function extractFromBrowsers(): Promise<AuthSession | null> {
   try {
     const mod = await import('@steipete/sweet-cookie');
     getCookies = mod.getCookies;
-  } catch {
-    // sweet-cookie 未安装，返回 null
+  } catch (error) {
+    reportRecoverableError('加载 sweet-cookie 失败', error);
     return null;
   }
 
@@ -198,7 +205,8 @@ async function extractFromBrowsers(): Promise<AuthSession | null> {
 
     if (!dbcl2) return null;
     return createSession(dbcl2, ck || undefined, normalizeBrowserSource(source));
-  } catch {
+  } catch (error) {
+    reportRecoverableError('从浏览器提取 Cookie 失败', error);
     return null;
   }
 }
@@ -248,9 +256,10 @@ function toSessionFromPuppeteerCookies(cookies: PuppeteerCookie[]): AuthSession 
 async function extractFromPuppeteerBrowserLogin(): Promise<AuthSession | null> {
   let puppeteerModule: unknown;
   try {
-    const dynamicImport = new Function('modulePath', 'return import(modulePath)') as (modulePath: string) => Promise<unknown>;
-    puppeteerModule = await dynamicImport('puppeteer');
-  } catch {
+    const moduleName = 'puppeteer';
+    puppeteerModule = await import(moduleName);
+  } catch (error) {
+    reportRecoverableError('加载 puppeteer 失败', error);
     return null;
   }
 
@@ -276,14 +285,15 @@ async function extractFromPuppeteerBrowserLogin(): Promise<AuthSession | null> {
 
     const cookies = await page.cookies();
     return toSessionFromPuppeteerCookies(cookies as PuppeteerCookie[]);
-  } catch {
+  } catch (error) {
+    reportRecoverableError('通过 puppeteer 登录提取 Cookie 失败', error);
     return null;
   } finally {
     if (browser) {
       try {
         await browser.close();
-      } catch {
-        // Ignore browser close errors; login result has already been determined.
+      } catch (error) {
+        reportRecoverableError('关闭 puppeteer 浏览器失败', error);
       }
     }
   }

@@ -101,8 +101,9 @@ export async function getCelebrityDetail(id: string): Promise<CelebrityDetail> {
         source: 'personage'
       };
     }
-  } catch {
-    // Continue to final error.
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[celebrity] 获取人物详情失败: ${message}`);
   }
 
   throw new Error(`Failed to fetch celebrity detail for id=${celebrityId}`);

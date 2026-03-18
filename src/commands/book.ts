@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { getBookHot, getBookInfo, searchBooks } from '../api/index.js';
 import { withErrorHandler } from '../utils/error.js';
+import { parseNonNegativeInt, parsePositiveInt } from '../utils/parsing.js';
 import { withSpinner } from '../utils/spinner.js';
 
 export function registerBookCommands(program: Command): void {
@@ -18,9 +19,11 @@ export function registerBookCommands(program: Command): void {
       command: 'book hot',
       suggestion: '可尝试：douban book hot -n 30'
     }, async (opts) => {
+      const start = parseNonNegativeInt(opts.start, '--start', 0);
+      const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const items = await withSpinner(
         '正在获取热门书籍...',
-        () => getBookHot(parseInt(opts.start, 10), parseInt(opts.limit, 10)),
+        () => getBookHot(start, limit),
         !opts.json
       );
 
@@ -46,9 +49,11 @@ export function registerBookCommands(program: Command): void {
       target: `关键词: ${String(args[0])}`,
       suggestion: '可尝试：douban book search 三体'
     }), async (keyword, opts) => {
+      const start = parseNonNegativeInt(opts.start, '--start', 0);
+      const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const items = await withSpinner(
         `正在搜索书籍“${keyword}”...`,
-        () => searchBooks(keyword, parseInt(opts.start, 10), parseInt(opts.limit, 10)),
+        () => searchBooks(keyword, start, limit),
         !opts.json
       );
 

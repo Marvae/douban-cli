@@ -15,6 +15,7 @@ import {
   searchMovies
 } from '../api/index.js';
 import { withErrorHandler } from '../utils/error.js';
+import { isNumericId, parseNonNegativeInt, parsePositiveInt } from '../utils/parsing.js';
 import { withSpinner } from '../utils/spinner.js';
 
 interface TableColumn<Row> {
@@ -125,27 +126,6 @@ function formatTags(values: string[] | undefined): string {
 function formatRegion(values: string[] | undefined): string {
   if (!values || values.length === 0) return '-';
   return values.join('/');
-}
-
-function isNumericId(value: string): boolean {
-  return /^\d+$/.test(value.trim());
-}
-
-function parseNonNegativeInt(value: string | undefined, optionName: string, fallback: number): number {
-  if (typeof value === 'undefined') return fallback;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`${optionName} 必须是非负整数`);
-  }
-  return parsed;
-}
-
-function parsePositiveInt(value: string | undefined, optionName: string, fallback: number): number {
-  const parsed = parseNonNegativeInt(value, optionName, fallback);
-  if (parsed <= 0) {
-    throw new Error(`${optionName} 必须大于 0`);
-  }
-  return parsed;
 }
 
 export function registerMovieCommands(program: Command): void {

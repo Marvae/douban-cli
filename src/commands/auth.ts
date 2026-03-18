@@ -1,8 +1,24 @@
 import { Command } from 'commander';
-import { clearAuthCache, ensureAuth, getCachedAuthSession, loginWithBrowser } from '../auth.js';
+import { clearAuthCache, ensureAuth, getCachedAuthSession, loginWithBrowser, type AuthSession } from '../auth.js';
 import { getCurrentUserProfile } from '../api/index.js';
 import { withErrorHandler } from '../utils/error.js';
 import { withSpinner } from '../utils/spinner.js';
+
+function maskToken(token: string | undefined): string | undefined {
+  if (!token) return undefined;
+  if (token.length <= 8) return '***';
+  return `${token.slice(0, 4)}...${token.slice(-4)}`;
+}
+
+function toSafeSessionJson(session: AuthSession): Record<string, string | undefined> {
+  return {
+    dbcl2: maskToken(session.dbcl2),
+    ck: maskToken(session.ck),
+    cookies: undefined,
+    source: session.source,
+    updatedAt: session.updatedAt
+  };
+}
 
 export function registerAuthCommands(program: Command): void {
   program
@@ -20,7 +36,7 @@ export function registerAuthCommands(program: Command): void {
       );
 
       if (opts.json) {
-        console.log(JSON.stringify(session, null, 2));
+        console.log(JSON.stringify(toSafeSessionJson(session), null, 2));
         return;
       }
 

@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { getHotLists } from '../api/index.js';
 import { withErrorHandler } from '../utils/error.js';
+import { parsePositiveInt } from '../utils/parsing.js';
 import { withSpinner } from '../utils/spinner.js';
 
 export function registerListCommands(program: Command): void {
@@ -13,9 +14,10 @@ export function registerListCommands(program: Command): void {
       command: 'list',
       suggestion: '可尝试：douban list -n 10'
     }, async (opts) => {
+      const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const items = await withSpinner(
         '正在获取热门豆列...',
-        () => getHotLists(parseInt(opts.limit, 10)),
+        () => getHotLists(limit),
         !opts.json
       );
 

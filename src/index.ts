@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import { createRequire } from 'node:module';
 import { registerBookCommands } from './commands/book.js';
 import { registerCelebrityCommands } from './commands/celebrity.js';
 import { registerListCommands } from './commands/list.js';
@@ -10,12 +11,15 @@ import { registerAuthCommands } from './commands/auth.js';
 import { registerSocialCommands } from './commands/social.js';
 import { handleProgramError } from './utils/error.js';
 
+const require = createRequire(import.meta.url);
+const pkg = require('../package.json') as { version?: string };
+
 const program = new Command();
 
 program
   .name('douban')
   .description('豆瓣命令行工具（电影 / 书籍 / 用户）')
-  .version('0.2.0');
+  .version(pkg.version || '0.0.0');
 
 program.configureHelp({
   formatHelp: (cmd) => {

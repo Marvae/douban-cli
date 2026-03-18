@@ -79,32 +79,44 @@ function parseBookSearchFromHtml(html: string, limit: number): BookSearchItem[] 
  * Get Douban Book Top250 list.
  */
 export async function getBookHot(start = 0, limit = 20): Promise<BookItem[]> {
-  const html = await fetchHtml(`${BOOK_BASE}/top250?start=${start}`, { Referer: BOOK_BASE });
-  if (isChallengePage(html)) throw new Error('Book top page is blocked by anti-bot challenge');
-
   const results: BookItem[] = [];
   const tableRegex = /<table width="100%">([\s\S]*?)<\/table>/g;
+  const seen = new Set<string>();
+  let pageStart = Math.max(0, start);
 
-  let tableMatch;
-  while ((tableMatch = tableRegex.exec(html)) !== null && results.length < limit) {
-    const block = tableMatch[1];
-    const idMatch = block.match(/href="https:\/\/book\.douban\.com\/subject\/(\d+)\/"/);
-    const titleMatch = block.match(/<a[^>]*title="([^"]+)"[^>]*>/);
-    const ratingMatch = block.match(/<span class="rating_nums">([^<]+)<\/span>/);
-    const votesMatch = block.match(/<span class="pl">\(([\s\S]*?)\)<\/span>/);
-    const metaMatch = block.match(/<p class="pl">([\s\S]*?)<\/p>/);
+  while (results.length < limit) {
+    const html = await fetchHtml(`${BOOK_BASE}/top250?start=${pageStart}`, { Referer: BOOK_BASE });
+    if (isChallengePage(html)) throw new Error('Book top page is blocked by anti-bot challenge');
 
-    if (!idMatch || !titleMatch) continue;
+    let tableMatch;
+    let addedThisPage = 0;
+    while ((tableMatch = tableRegex.exec(html)) !== null && results.length < limit) {
+      const block = tableMatch[1];
+      const idMatch = block.match(/href="https:\/\/book\.douban\.com\/subject\/(\d+)\/"/);
+      const titleMatch = block.match(/<a[^>]*title="([^"]+)"[^>]*>/);
+      const ratingMatch = block.match(/<span class="rating_nums">([^<]+)<\/span>/);
+      const votesMatch = block.match(/<span class="pl">\(([\s\S]*?)\)<\/span>/);
+      const metaMatch = block.match(/<p class="pl">([\s\S]*?)<\/p>/);
 
-    const id = idMatch[1];
-    results.push({
-      id,
-      title: normalizeTitle(titleMatch[1]),
-      rating: ratingMatch ? cleanText(ratingMatch[1]) : '-',
-      votes: votesMatch ? cleanText(votesMatch[1]) : '-',
-      meta: metaMatch ? cleanText(metaMatch[1]) : '-',
-      url: `https://book.douban.com/subject/${id}/`
-    });
+      if (!idMatch || !titleMatch) continue;
+      const id = idMatch[1];
+      if (seen.has(id)) continue;
+      seen.add(id);
+      addedThisPage += 1;
+
+      results.push({
+        id,
+        title: normalizeTitle(titleMatch[1]),
+        rating: ratingMatch ? cleanText(ratingMatch[1]) : '-',
+        votes: votesMatch ? cleanText(votesMatch[1]) : '-',
+        meta: metaMatch ? cleanText(metaMatch[1]) : '-',
+        url: `https://book.douban.com/subject/${id}/`
+      });
+    }
+
+    tableRegex.lastIndex = 0;
+    if (addedThisPage === 0) break;
+    pageStart += 25;
   }
 
   return results;

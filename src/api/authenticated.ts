@@ -1,4 +1,5 @@
 import { BASE, UA, cleanText, fetchHtml } from './common.js';
+import { formEncode } from '../utils/parsing.js';
 
 type InterestStatus = 'collect' | 'wish' | 'do';
 
@@ -43,19 +44,14 @@ export interface ReviewCreateResult {
   url: string;
 }
 
-function formEncode(data: Record<string, string>): string {
-  const body = new URLSearchParams();
-  for (const [key, value] of Object.entries(data)) {
-    if (!value) continue;
-    body.set(key, value);
-  }
-  return body.toString();
-}
+const FETCH_TIMEOUT_MS = 30000;
 
 function parseJsonResponse(text: string): DoubanJsonResponse {
   try {
     return JSON.parse(text) as DoubanJsonResponse;
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[authenticated] JSON 解析失败: ${message}`);
     return {};
   }
 }
@@ -93,7 +89,8 @@ async function postForm(url: string, data: Record<string, string>, cookies: stri
       'X-Requested-With': 'XMLHttpRequest',
       'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
     },
-    body: formEncode(data)
+    body: formEncode(data),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
   });
 
   const text = await res.text();
@@ -227,7 +224,9 @@ export async function unmarkSubject(movieId: string, cookies: string, existingCk
       `${BASE}/subject/${id}/`
     );
     return;
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[authenticated] removeinterest 失败，回退 interest=none: ${message}`);
     await postForm(
       `${BASE}/j/subject/${id}/interest`,
       { ck, interest: 'none' },
@@ -250,7 +249,9 @@ export async function followUser(userId: string, cookies: string, existingCk?: s
       'https://www.douban.com/'
     );
     return;
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[authenticated] follow 接口失败，回退 add: ${message}`);
     await postForm(
       'https://www.douban.com/j/contact/add',
       { ck, people_id: id },
@@ -273,7 +274,9 @@ export async function unfollowUser(userId: string, cookies: string, existingCk?:
       'https://www.douban.com/'
     );
     return;
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[authenticated] unfollow 接口失败，回退 remove: ${message}`);
     await postForm(
       'https://www.douban.com/j/contact/remove',
       { ck, people_id: id },
@@ -366,7 +369,9 @@ function parseCollectionNextStart(html: string): number | null {
 
   try {
     url = new URL(href, BASE);
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[authenticated] 解析下一页 start 失败: ${message}`);
     return null;
   }
 

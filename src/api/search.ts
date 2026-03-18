@@ -77,8 +77,9 @@ export async function searchMovies(keyword: string, start = 0, limit = 20): Prom
   let suggestYears = new Map<string, string>();
   try {
     suggestYears = await fetchSuggestYears(query);
-  } catch {
-    // Ignore suggest API failure.
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[search] suggest 年份接口失败: ${message}`);
   }
 
   try {
@@ -116,8 +117,9 @@ export async function searchMovies(keyword: string, start = 0, limit = 20): Prom
         year: suggestYears.get(item.id) || item.year
       }));
     }
-  } catch {
-    // Fallback to HTML parser below.
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[search] JSON 搜索接口失败，回退 HTML 解析: ${message}`);
   }
 
   const pageUrl = `https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(query)}&cat=1002&start=${start}`;

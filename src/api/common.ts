@@ -1,10 +1,12 @@
-export const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
+export const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
 export const BASE = 'https://movie.douban.com';
 export const BOOK_BASE = 'https://book.douban.com';
+const FETCH_TIMEOUT_MS = 30000;
 
 export async function fetchJson<T>(url: string, headers: Record<string, string> = {}): Promise<T> {
   const res = await fetch(url, {
-    headers: { 'User-Agent': UA, ...headers }
+    headers: { 'User-Agent': UA, ...headers },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json() as Promise<T>;
@@ -12,7 +14,8 @@ export async function fetchJson<T>(url: string, headers: Record<string, string> 
 
 export async function fetchHtml(url: string, headers: Record<string, string> = {}): Promise<string> {
   const res = await fetch(url, {
-    headers: { 'User-Agent': UA, ...headers }
+    headers: { 'User-Agent': UA, ...headers },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.text();

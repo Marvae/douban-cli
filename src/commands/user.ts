@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import { detectAuthSession, getCachedAuthSession } from '../auth.js';
 import { getCurrentUserProfile, getUserCollection } from '../api/index.js';
 import { withErrorHandler } from '../utils/error.js';
+import { parsePositiveInt } from '../utils/parsing.js';
 import { withSpinner } from '../utils/spinner.js';
 
 type CliConfig = {
@@ -13,22 +14,15 @@ type CliConfig = {
 
 const CONFIG_PATH = path.join(os.homedir(), '.douban-cli.json');
 
-function parsePositiveInt(value: string | undefined, optionName: string, fallback: number): number {
-  if (typeof value === 'undefined') return fallback;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${optionName} 必须是正整数`);
-  }
-  return parsed;
-}
-
 function readConfig(): CliConfig {
   if (!existsSync(CONFIG_PATH)) return {};
   try {
     const content = readFileSync(CONFIG_PATH, 'utf8');
     const parsed = JSON.parse(content) as CliConfig;
     return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[config] 读取配置失败: ${message}`);
     return {};
   }
 }
@@ -134,8 +128,9 @@ export function registerUserCommands(program: Command): void {
           try {
             const profile = await withSpinner('正在识别当前登录用户...', () => getCurrentUserProfile(cached.cookies), !opts.json);
             userId = profile.id;
-          } catch {
-            // Fallback to interactive auth check below.
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(`[me] 读取缓存登录用户失败: ${message}`);
           }
         }
       }
@@ -148,7 +143,9 @@ export function registerUserCommands(program: Command): void {
           }
           const profile = await withSpinner('正在识别当前登录用户...', () => getCurrentUserProfile(auth.cookies), !opts.json);
           userId = profile.id;
-        } catch {
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[me] 检测登录用户失败: ${message}`);
           throw new Error('未配置默认用户，也未检测到登录 Cookie。请先运行 douban login 或 douban config --user <id>');
         }
       }
