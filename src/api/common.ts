@@ -1,7 +1,7 @@
 export const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
 export const BASE = 'https://movie.douban.com';
 export const BOOK_BASE = 'https://book.douban.com';
-const FETCH_TIMEOUT_MS = 30000;
+export const FETCH_TIMEOUT_MS = 30000;
 
 export async function fetchJson<T>(url: string, headers: Record<string, string> = {}): Promise<T> {
   const res = await fetch(url, {
@@ -69,4 +69,58 @@ export function extractField(infoHtml: string, label: string): string {
   );
   const match = infoHtml.match(pattern);
   return match ? cleanText(match[1]).replace(/^:/, '').trim() : '';
+}
+
+export function extractWindowJsonObject(html: string, variable = '__DATA__'): string | null {
+  const marker = `window.${variable}`;
+  const markerIndex = html.indexOf(marker);
+  if (markerIndex < 0) return null;
+
+  const equalIndex = html.indexOf('=', markerIndex + marker.length);
+  if (equalIndex < 0) return null;
+
+  let start = equalIndex + 1;
+  while (start < html.length && /\s/.test(html[start] || '')) {
+    start += 1;
+  }
+  if (html[start] !== '{') return null;
+
+  let depth = 0;
+  let quote: '"' | "'" | null = null;
+  let escaped = false;
+
+  for (let i = start; i < html.length; i += 1) {
+    const ch = html[i];
+    if (typeof ch !== 'string') break;
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+
+    if (ch === '{') {
+      depth += 1;
+      continue;
+    }
+
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return html.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
 }

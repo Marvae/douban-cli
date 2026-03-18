@@ -13,12 +13,14 @@ export interface DoulistItem {
  * Get hot doulist recommendations from https://www.douban.com/doulist/
  */
 export async function getHotLists(limit = 20): Promise<DoulistItem[]> {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
+
   const html = await fetchHtml('https://www.douban.com/doulist/', {
     Referer: 'https://www.douban.com/'
   });
 
   if (isChallengePage(html)) {
-    throw new Error('Doulist page is blocked by anti-bot challenge');
+    throw new Error('豆列页面触发了反爬挑战，暂时无法解析');
   }
 
   const results: DoulistItem[] = [];

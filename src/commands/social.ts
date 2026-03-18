@@ -12,6 +12,7 @@ import {
 import { withErrorHandler } from '../utils/error.js';
 import { isNumericId, parsePositiveInt } from '../utils/parsing.js';
 import { withSpinner } from '../utils/spinner.js';
+import { parseDelaySeconds, sleep } from '../utils/timing.js';
 
 type ExportFormat = 'json' | 'csv';
 
@@ -108,19 +109,6 @@ function parseExportFormat(value: string | undefined): ExportFormat {
   throw new Error('--format 仅支持 json 或 csv');
 }
 
-function parseDelaySeconds(value: string | undefined, fallback: number): number {
-  if (typeof value === 'undefined') return fallback;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error('--delay 必须是非负数字');
-  }
-  return parsed;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export function registerSocialCommands(program: Command): void {
   program
     .command('review [movieId] [title] [content]')
@@ -205,7 +193,9 @@ export function registerSocialCommands(program: Command): void {
       command: 'stats',
       suggestion: '可尝试：douban stats --year 2026'
     }, async (opts) => {
-      const year = opts.year ? Number(opts.year) : new Date().getFullYear();
+      const year = typeof opts.year === 'string'
+        ? parsePositiveInt(opts.year, '--year', new Date().getFullYear())
+        : new Date().getFullYear();
       if (!Number.isInteger(year) || year < 1900 || year > 3000) {
         throw new Error('年份格式不正确');
       }
@@ -250,6 +240,11 @@ export function registerSocialCommands(program: Command): void {
       const delaySeconds = parseDelaySeconds(opts.delay, 1);
       const delayMs = Math.round(delaySeconds * 1000);
 
+      const outputPath = String(opts.output || '').trim();
+      if (!outputPath) {
+        throw new Error('输出文件路径不能为空');
+      }
+
       const auth = await withSpinner('正在检查登录状态...', () => ensureAuth(), true);
       const me = await withSpinner('正在识别当前用户...', () => getCurrentUserProfile(auth.cookies), true);
 
@@ -281,12 +276,12 @@ export function registerSocialCommands(program: Command): void {
       const merged = [...collect, ...wish, ...doing];
 
       if (format === 'json') {
-        writeFileSync(opts.output, `${JSON.stringify({ user: me, records: merged }, null, 2)}\n`, 'utf8');
+        writeFileSync(outputPath, `${JSON.stringify({ user: me, records: merged }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
       } else {
-        writeFileSync(opts.output, toCsv(merged), 'utf8');
+        writeFileSync(outputPath, toCsv(merged), { encoding: 'utf8', mode: 0o600 });
       }
 
-      console.log(`✅ 已导出 ${merged.length} 条记录到 ${opts.output}`);
+      console.log(`✅ 已导出 ${merged.length} 条记录到 ${outputPath}`);
     }));
 
   program
@@ -306,6 +301,8 @@ export function registerSocialCommands(program: Command): void {
         console.log('示例: douban follow USER_ID');
         return;
       }
+      const id = String(userId).trim();
+      if (!id) throw new Error('用户 ID 不能为空');
       const delaySeconds = parseDelaySeconds(opts.delay, 0);
       const delayMs = Math.round(delaySeconds * 1000);
 
@@ -313,12 +310,12 @@ export function registerSocialCommands(program: Command): void {
       if (delayMs > 0) {
         await withSpinner(`等待 ${delaySeconds} 秒后提交...`, () => sleep(delayMs), !opts.json);
       }
-      await withSpinner('正在关注用户...', () => followUser(String(userId), auth.cookies, auth.ck), !opts.json);
+      await withSpinner('正在关注用户...', () => followUser(id, auth.cookies, auth.ck), !opts.json);
 
       if (opts.json) {
-        console.log(JSON.stringify({ ok: true, userId }, null, 2));
+        console.log(JSON.stringify({ ok: true, userId: id }, null, 2));
       } else {
-        console.log(`✅ 已关注 ${userId}`);
+        console.log(`✅ 已关注 ${id}`);
       }
     }));
 
@@ -338,6 +335,8 @@ export function registerSocialCommands(program: Command): void {
         console.log('示例: douban unfollow USER_ID');
         return;
       }
+      const id = String(userId).trim();
+      if (!id) throw new Error('用户 ID 不能为空');
       const delaySeconds = parseDelaySeconds(opts.delay, 0);
       const delayMs = Math.round(delaySeconds * 1000);
 
@@ -345,12 +344,12 @@ export function registerSocialCommands(program: Command): void {
       if (delayMs > 0) {
         await withSpinner(`等待 ${delaySeconds} 秒后提交...`, () => sleep(delayMs), !opts.json);
       }
-      await withSpinner('正在取消关注...', () => unfollowUser(String(userId), auth.cookies, auth.ck), !opts.json);
+      await withSpinner('正在取消关注...', () => unfollowUser(id, auth.cookies, auth.ck), !opts.json);
 
       if (opts.json) {
-        console.log(JSON.stringify({ ok: true, userId }, null, 2));
+        console.log(JSON.stringify({ ok: true, userId: id }, null, 2));
       } else {
-        console.log(`✅ 已取消关注 ${userId}`);
+        console.log(`✅ 已取消关注 ${id}`);
       }
     }));
 }

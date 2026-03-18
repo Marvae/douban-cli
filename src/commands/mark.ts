@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { ensureAuth } from '../auth.js';
-import { BASE, UA, fetchHtml } from '../api/common.js';
-import { unmarkSubject } from '../api/index.js';
+import { BASE, FETCH_TIMEOUT_MS, UA } from '../api/common.js';
+import { resolveCk, unmarkSubject } from '../api/index.js';
 import { withErrorHandler } from '../utils/error.js';
 import { formEncode, isNumericId } from '../utils/parsing.js';
 import { withSpinner } from '../utils/spinner.js';
+import { parseDelaySeconds, sleep } from '../utils/timing.js';
 
 type Interest = 'wish' | 'collect' | 'do';
 
@@ -28,26 +29,16 @@ interface BatchItem {
   text?: string;
 }
 
+interface BatchResult {
+  ok: boolean;
+}
+
 const INTEREST_PATH = (id: string) => `${BASE}/j/subject/${id}/interest`;
-const FETCH_TIMEOUT_MS = 30000;
 
 function parseNumericId(value: string): string {
   const id = value.trim();
   if (!isNumericId(id)) throw new Error(`无效条目 ID: ${value}`);
   return id;
-}
-
-function parseDelaySeconds(value: string | undefined): number {
-  if (!value) return NaN;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error('--delay 必须是非负数字');
-  }
-  return parsed;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function nextDelayMs(index: number, total: number, delaySeconds: number): number {
@@ -59,14 +50,23 @@ function nextDelayMs(index: number, total: number, delaySeconds: number): number
 
 function readBatchLines(filePath: string): string[] {
   const raw = readFileSync(filePath, 'utf8');
-  return raw
+  const lines = raw
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith('#'));
+
+  if (lines.length === 0) {
+    throw new Error(`批量文件为空: ${filePath}`);
+  }
+
+  return lines;
 }
 
 function parseIdFile(filePath: string): BatchItem[] {
-  return readBatchLines(filePath).map((line) => ({ id: parseNumericId(line.split(/[\s,]/)[0] || '') }));
+  return readBatchLines(filePath).map((line) => {
+    const firstCell = line.split(/[\s,]/)[0] || '';
+    return { id: parseNumericId(firstCell) };
+  });
 }
 
 function parseRateFile(filePath: string): BatchItem[] {
@@ -94,31 +94,13 @@ function parseCommentFile(filePath: string): BatchItem[] {
   });
 }
 
-async function resolveCk(existing: string | undefined, id: string, cookieHeader: string): Promise<string> {
-  if (existing) return existing;
-
-  const subjectUrl = `${BASE}/subject/${id}/`;
-  const html = await fetchHtml(subjectUrl, {
-    Referer: BASE,
-    Cookie: cookieHeader
-  });
-
-  const inputMatch = html.match(/name=["']ck["']\s+value=["']([^"']+)["']/i);
-  if (inputMatch?.[1]) return inputMatch[1];
-
-  const jsMatch = html.match(/[?&]ck=([A-Za-z0-9]+)/);
-  if (jsMatch?.[1]) return jsMatch[1];
-
-  throw new Error('无法从条目页面解析 ck token');
-}
-
 async function submitInterest(
   id: string,
   payload: InterestPayload,
   cookieHeader: string,
   existingCk?: string
 ): Promise<InterestResponse> {
-  const ck = await resolveCk(existingCk, id, cookieHeader);
+  const ck = await resolveCk(cookieHeader, existingCk, id);
   const form = formEncode({
     interest: payload.interest,
     rating: payload.rating ? String(payload.rating) : '',
@@ -176,6 +158,20 @@ function selectInterestFromOptions(opts: { wish?: boolean; watched?: boolean; wa
   return 'collect';
 }
 
+function isValidScore(value: number | undefined): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 5;
+}
+
+function finalizeBatch(results: BatchResult[], outputJson: boolean): void {
+  const okCount = results.filter((r) => r.ok).length;
+  if (!outputJson) {
+    console.log(`done: ${okCount}/${results.length}`);
+  }
+  if (okCount !== results.length) {
+    process.exitCode = 1;
+  }
+}
+
 export function registerMarkCommands(program: Command): void {
   program
     .command('mark [id]')
@@ -220,12 +216,11 @@ export function registerMarkCommands(program: Command): void {
 
       if (opts.json) {
         console.log(JSON.stringify(results, null, 2));
+        finalizeBatch(results, true);
         return;
       }
 
-      const okCount = results.filter((r) => r.ok).length;
-      console.log(`done: ${okCount}/${results.length}`);
-      if (okCount !== results.length) process.exitCode = 1;
+      finalizeBatch(results, false);
     }));
 
   program
@@ -256,7 +251,18 @@ export function registerMarkCommands(program: Command): void {
 
       for (let i = 0; i < items.length; i += 1) {
         const item = items[i];
-        const score = item.score as number;
+        const rawScore = item.score;
+
+        if (!isValidScore(rawScore)) {
+          const message = `ID=${item.id} 的评分无效，应为 1-5 的整数`;
+          results.push({ id: item.id, score: Number.NaN, ok: false, error: message });
+          if (!opts.json) console.error(`✗ ${item.id}: ${message}`);
+          const delayMs = nextDelayMs(i, items.length, delaySeconds);
+          if (delayMs > 0) await sleep(delayMs);
+          continue;
+        }
+
+        const score = rawScore;
 
         try {
           await withSpinner(
@@ -278,12 +284,11 @@ export function registerMarkCommands(program: Command): void {
 
       if (opts.json) {
         console.log(JSON.stringify(results, null, 2));
+        finalizeBatch(results, true);
         return;
       }
 
-      const okCount = results.filter((r) => r.ok).length;
-      console.log(`done: ${okCount}/${results.length}`);
-      if (okCount !== results.length) process.exitCode = 1;
+      finalizeBatch(results, false);
     }));
 
   program
@@ -311,11 +316,21 @@ export function registerMarkCommands(program: Command): void {
 
       for (let i = 0; i < items.length; i += 1) {
         const item = items[i];
+        const comment = item.text?.trim() || '';
+
+        if (!comment) {
+          const message = `ID=${item.id} 的短评内容为空`;
+          results.push({ id: item.id, ok: false, error: message });
+          if (!opts.json) console.error(`✗ ${item.id}: ${message}`);
+          const delayMs = nextDelayMs(i, items.length, delaySeconds);
+          if (delayMs > 0) await sleep(delayMs);
+          continue;
+        }
 
         try {
           await withSpinner(
             `正在发布短评 ${item.id}...`,
-            () => submitInterest(item.id, { interest: 'collect', comment: item.text }, auth.cookies, auth.ck),
+            () => submitInterest(item.id, { interest: 'collect', comment }, auth.cookies, auth.ck),
             !opts.json
           );
           results.push({ id: item.id, ok: true });
@@ -332,12 +347,11 @@ export function registerMarkCommands(program: Command): void {
 
       if (opts.json) {
         console.log(JSON.stringify(results, null, 2));
+        finalizeBatch(results, true);
         return;
       }
 
-      const okCount = results.filter((r) => r.ok).length;
-      console.log(`done: ${okCount}/${results.length}`);
-      if (okCount !== results.length) process.exitCode = 1;
+      finalizeBatch(results, false);
     }));
 
   program
@@ -385,11 +399,10 @@ export function registerMarkCommands(program: Command): void {
 
       if (opts.json) {
         console.log(JSON.stringify(results, null, 2));
+        finalizeBatch(results, true);
         return;
       }
 
-      const okCount = results.filter((r) => r.ok).length;
-      console.log(`done: ${okCount}/${results.length}`);
-      if (okCount !== results.length) process.exitCode = 1;
+      finalizeBatch(results, false);
     }));
 }

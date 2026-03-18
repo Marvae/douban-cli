@@ -1,4 +1,4 @@
-import { cleanText, fetchHtml, fetchJson, normalizeTitle } from './common.js';
+import { cleanText, extractWindowJsonObject, fetchHtml, fetchJson, normalizeTitle } from './common.js';
 
 export interface SearchItem {
   id: string;
@@ -32,10 +32,10 @@ async function fetchSuggestYears(keyword: string): Promise<Map<string, string>> 
 }
 
 function parseSearchFromHtml(html: string, limit: number): SearchItem[] {
-  const dataMatch = html.match(/window\.__DATA__\s*=\s*(\{[\s\S]*?\});/);
-  if (!dataMatch) throw new Error('Search data not found in HTML');
+  const rawData = extractWindowJsonObject(html, '__DATA__');
+  if (!rawData) throw new Error('搜索页未找到完整的 __DATA__ JSON 数据');
 
-  const data = JSON.parse(dataMatch[1]) as {
+  const data = JSON.parse(rawData) as {
     items?: Array<{
       tpl_name?: string;
       id?: string | number;
@@ -73,6 +73,7 @@ function parseSearchFromHtml(html: string, limit: number): SearchItem[] {
 export async function searchMovies(keyword: string, start = 0, limit = 20): Promise<SearchItem[]> {
   const query = keyword.trim();
   if (!query) return [];
+  if (!Number.isFinite(limit) || limit <= 0) return [];
 
   let suggestYears = new Map<string, string>();
   try {
@@ -88,7 +89,7 @@ export async function searchMovies(keyword: string, start = 0, limit = 20): Prom
       Referer: 'https://www.douban.com/search'
     });
 
-    if (!Array.isArray(data.items)) throw new Error('Invalid search API response');
+    if (!Array.isArray(data.items)) throw new Error('搜索接口返回格式异常');
 
     const items = data.items
       .map((item) => {

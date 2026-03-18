@@ -31,6 +31,18 @@ function getDisplayWidth(text: string): number {
     const code = char.codePointAt(0) ?? 0;
 
     if (
+      (code >= 0x1f300 && code <= 0x1f5ff) ||
+      (code >= 0x1f600 && code <= 0x1f64f) ||
+      (code >= 0x1f680 && code <= 0x1f6ff) ||
+      (code >= 0x1f900 && code <= 0x1f9ff) ||
+      (code >= 0x1fa70 && code <= 0x1faff) ||
+      (code >= 0x2600 && code <= 0x27bf)
+    ) {
+      width += 2;
+      continue;
+    }
+
+    if (
       (code >= 0x1100 && code <= 0x115f) ||
       code === 0x2329 ||
       code === 0x232a ||
@@ -87,7 +99,8 @@ function renderTable<Row>(rows: Row[], columns: TableColumn<Row>[]): void {
 }
 
 function compactNumber(value: number | undefined): string {
-  if (!value || value <= 0) return '-';
+  if (value === 0) return '0';
+  if (!value || value < 0) return '-';
   if (value >= 10000) {
     const n = Math.round((value / 10000) * 10) / 10;
     return Number.isInteger(n) ? `${n.toFixed(0)}万` : `${n.toFixed(1)}万`;
@@ -126,6 +139,14 @@ function formatTags(values: string[] | undefined): string {
 function formatRegion(values: string[] | undefined): string {
   if (!values || values.length === 0) return '-';
   return values.join('/');
+}
+
+function normalizeMovieIdInput(value: string, fieldName = '电影 ID'): string {
+  const id = value.trim();
+  if (!isNumericId(id)) {
+    throw new Error(`${fieldName} 必须是纯数字: ${value}`);
+  }
+  return id;
 }
 
 export function registerMovieCommands(program: Command): void {
@@ -295,9 +316,13 @@ export function registerMovieCommands(program: Command): void {
       target: `城市: ${String((args[0] as { city?: string }).city ?? '')}`,
       suggestion: '可尝试：douban now -c 上海'
     }), async (opts) => {
-      const cityCode = CITIES[opts.city] || opts.city;
+      const cityInput = String(opts.city || '').trim();
+      const cityCode = CITIES[cityInput] || cityInput;
+      if (!cityCode) {
+        throw new Error('城市不能为空');
+      }
       const items = await withSpinner(
-        `正在获取${opts.city}热映电影...`,
+        `正在获取${cityInput}热映电影...`,
         () => getNowPlaying(cityCode),
         !opts.json
       );
@@ -305,7 +330,7 @@ export function registerMovieCommands(program: Command): void {
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
       } else {
-        console.log(`\n🎬 ${opts.city}正在热映\n`);
+        console.log(`\n🎬 ${cityInput}正在热映\n`);
         renderTable(items, [
           { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
           { header: '片名', value: (item) => item.title, minWidth: 18 },
@@ -378,12 +403,13 @@ export function registerMovieCommands(program: Command): void {
       let movieId = id.trim();
       if (!isNumericId(movieId)) {
         const result = await searchMovies(movieId, 0, 1);
-        if (result.length === 0 || !result[0]?.id) {
+        const matched = result[0];
+        if (!matched?.id) {
           throw new Error(`未找到电影：${movieId}`);
         }
-        movieId = result[0].id;
+        movieId = normalizeMovieIdInput(matched.id, '匹配到的电影 ID');
         if (!opts.json) {
-          console.log(`\n🔎 已匹配为: ${result[0].title} (${movieId})`);
+          console.log(`\n🔎 已匹配为: ${matched.title} (${movieId})`);
         }
       }
 
@@ -421,9 +447,10 @@ export function registerMovieCommands(program: Command): void {
         console.log('示例: douban rating 1292052');
         return;
       }
+      const movieId = normalizeMovieIdInput(id);
       const stats = await withSpinner(
         '正在获取评分分布...',
-        () => getRatingStats(id),
+        () => getRatingStats(movieId),
         !opts.json
       );
 
@@ -536,18 +563,19 @@ export function registerMovieCommands(program: Command): void {
         console.log('示例: douban reviews 1292052');
         return;
       }
+      const id = normalizeMovieIdInput(movieId);
       const start = parseNonNegativeInt(opts.start, '--start', 0);
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const items = await withSpinner(
         '正在获取热门影评...',
-        () => getReviews(movieId, start, limit),
+        () => getReviews(id, start, limit),
         !opts.json
       );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
       } else {
-        console.log(`\n💬 电影短评 ${movieId}\n`);
+        console.log(`\n💬 热门影评 (${id})\n`);
         if (items.length === 0) {
           console.log('未找到影评。');
           return;
@@ -577,19 +605,20 @@ export function registerMovieCommands(program: Command): void {
         console.log('示例: douban comments 1292052');
         return;
       }
+      const id = normalizeMovieIdInput(movieId);
       const orderBy = opts.latest ? 'latest' : 'hot';
       const start = parseNonNegativeInt(opts.start, '--start', 0);
       const limit = parsePositiveInt(opts.limit, '--limit', 10);
       const items = await withSpinner(
         `正在获取${opts.latest ? '最新' : '热门'}短评...`,
-        () => getComments(movieId, orderBy, start, limit),
+        () => getComments(id, orderBy, start, limit),
         !opts.json
       );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
       } else {
-        console.log(`\n💬 ${opts.latest ? '最新' : '热门'}短评 (${movieId})\n`);
+        console.log(`\n💬 ${opts.latest ? '最新' : '热门'}短评 (${id})\n`);
         if (items.length === 0) {
           console.log('暂无短评');
           return;

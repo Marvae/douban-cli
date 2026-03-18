@@ -49,15 +49,15 @@ export function withErrorHandler<T extends unknown[]>(
     } catch (error) {
       const resolved = typeof ctx === 'function' ? ctx(args, error) : ctx;
       printFriendlyError(error, resolved);
-      process.exit(1);
+      process.exitCode = 1;
     }
   };
 }
 
-export function handleProgramError(error: unknown): never {
+export function handleProgramError(error: unknown): void {
   printFriendlyError(error, {
     command: 'douban',
     suggestion: '可运行 douban --help 查看可用命令'
   });
-  process.exit(1);
+  process.exitCode = 1;
 }

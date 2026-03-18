@@ -18,7 +18,7 @@ Douban CLI - browse movies, TV shows, books, and personal collections from the t
 - `movie` 电影详情（支持 ID 或片名）
 - `rating` 评分分布
 - `comments` 短评
-- `reviews` 影评
+- `reviews` 热门影评
 
 ### Books / 书籍
 - `book hot` 热门书籍

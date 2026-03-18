@@ -18,8 +18,16 @@ function readConfig(): CliConfig {
   if (!existsSync(CONFIG_PATH)) return {};
   try {
     const content = readFileSync(CONFIG_PATH, 'utf8');
-    const parsed = JSON.parse(content) as CliConfig;
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    const parsed = JSON.parse(content) as unknown;
+    if (!parsed || typeof parsed !== 'object') return {};
+
+    const maybeUser = (parsed as Record<string, unknown>).user;
+    if (typeof maybeUser === 'string') {
+      const user = maybeUser.trim();
+      return user ? { user } : {};
+    }
+
+    return {};
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[config] 读取配置失败: ${message}`);
@@ -28,7 +36,7 @@ function readConfig(): CliConfig {
 }
 
 function writeConfig(config: CliConfig): void {
-  writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
 }
 
 export function registerUserCommands(program: Command): void {
@@ -139,7 +147,7 @@ export function registerUserCommands(program: Command): void {
         try {
           const auth = await detectAuthSession();
           if (!auth) {
-            throw new Error('NO_AUTH');
+            throw new Error('未检测到登录态');
           }
           const profile = await withSpinner('正在识别当前登录用户...', () => getCurrentUserProfile(auth.cookies), !opts.json);
           userId = profile.id;
@@ -153,9 +161,13 @@ export function registerUserCommands(program: Command): void {
       const status = opts.wish ? 'wish' : opts.doing ? 'do' : 'collect';
       const statusLabel = opts.wish ? '想看' : opts.doing ? '在看' : '看过';
       const limit = parsePositiveInt(opts.limit, '--limit', 30);
+      if (!userId) {
+        throw new Error('无法识别当前用户，请先运行 douban login 或 douban config --user <id>');
+      }
+
       const items = await withSpinner(
         `正在获取我的${statusLabel}片单...`,
-        () => getUserCollection(userId as string, status, limit),
+        () => getUserCollection(userId, status, limit),
         !opts.json
       );
 

@@ -29,6 +29,57 @@ const DOUBAN_LOGIN_URL = 'https://accounts.douban.com/passport/login';
 
 type PuppeteerCookie = { name?: string; value?: string };
 
+function asObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function parseEncryptedAuthCache(raw: unknown): EncryptedAuthCache | null {
+  const obj = asObject(raw);
+  if (!obj) return null;
+
+  if (obj.version !== 1) return null;
+
+  const source = typeof obj.source === 'string' ? obj.source : '';
+  const updatedAt = typeof obj.updatedAt === 'string' ? obj.updatedAt : '';
+  const salt = typeof obj.salt === 'string' ? obj.salt : '';
+  const iv = typeof obj.iv === 'string' ? obj.iv : '';
+  const tag = typeof obj.tag === 'string' ? obj.tag : '';
+  const data = typeof obj.data === 'string' ? obj.data : '';
+
+  if (!source || !updatedAt || !salt || !iv || !tag || !data) return null;
+
+  return {
+    version: 1,
+    source,
+    updatedAt,
+    salt,
+    iv,
+    tag,
+    data
+  };
+}
+
+function parseAuthSession(raw: unknown): AuthSession | null {
+  const obj = asObject(raw);
+  if (!obj) return null;
+
+  const dbcl2 = typeof obj.dbcl2 === 'string' ? obj.dbcl2.trim() : '';
+  if (!dbcl2) return null;
+
+  const ck = typeof obj.ck === 'string' && obj.ck.trim() ? obj.ck.trim() : undefined;
+  const source = typeof obj.source === 'string' && obj.source.trim() ? obj.source.trim() : 'Browser';
+  const updatedAt = typeof obj.updatedAt === 'string' && obj.updatedAt.trim() ? obj.updatedAt.trim() : new Date().toISOString();
+  const cookies = buildCookieHeader(dbcl2, ck);
+
+  return {
+    dbcl2,
+    ck,
+    cookies,
+    source,
+    updatedAt
+  };
+}
+
 function machineSecret(): Buffer {
   const payload = `${os.userInfo().username}|${os.hostname()}|${os.homedir()}|douban-cli`;
   return createHash('sha256').update(payload).digest();
@@ -56,8 +107,6 @@ function encryptCache(auth: AuthSession): EncryptedAuthCache {
 
 function decryptCache(payload: EncryptedAuthCache): AuthSession | null {
   try {
-    if (payload.version !== 1) return null;
-
     const salt = Buffer.from(payload.salt, 'base64');
     const iv = Buffer.from(payload.iv, 'base64');
     const tag = Buffer.from(payload.tag, 'base64');
@@ -67,11 +116,8 @@ function decryptCache(payload: EncryptedAuthCache): AuthSession | null {
     const decipher = createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(tag);
     const plaintext = Buffer.concat([decipher.update(data), decipher.final()]);
-
-    const parsed = JSON.parse(plaintext.toString('utf8')) as AuthSession;
-    if (!parsed || typeof parsed.dbcl2 !== 'string' || !parsed.dbcl2) return null;
-    if (typeof parsed.cookies !== 'string' || !parsed.cookies.includes('dbcl2=')) return null;
-    return parsed;
+    const decoded = JSON.parse(plaintext.toString('utf8')) as unknown;
+    return parseAuthSession(decoded);
   } catch (error) {
     reportRecoverableError('解密登录缓存失败', error);
     return null;
@@ -86,8 +132,10 @@ function readAuthCache(): AuthSession | null {
     const ageMs = Date.now() - stat.mtimeMs;
     if (ageMs > 30 * 24 * 60 * 60 * 1000) return null;
 
-    const raw = JSON.parse(readFileSync(AUTH_CACHE_PATH, 'utf8')) as EncryptedAuthCache;
-    return decryptCache(raw);
+    const raw = JSON.parse(readFileSync(AUTH_CACHE_PATH, 'utf8')) as unknown;
+    const parsed = parseEncryptedAuthCache(raw);
+    if (!parsed) return null;
+    return decryptCache(parsed);
   } catch (error) {
     reportRecoverableError('读取登录缓存失败', error);
     return null;
@@ -212,22 +260,27 @@ async function extractFromBrowsers(): Promise<AuthSession | null> {
 }
 
 function openLoginPage(): void {
+  let command: string;
+  let args: string[];
+
   if (process.platform === 'darwin') {
-    spawnSync('open', [DOUBAN_LOGIN_URL], { stdio: 'ignore' });
-    return;
+    command = 'open';
+    args = [DOUBAN_LOGIN_URL];
+  } else if (process.platform === 'linux') {
+    command = 'xdg-open';
+    args = [DOUBAN_LOGIN_URL];
+  } else if (process.platform === 'win32') {
+    command = 'cmd';
+    args = ['/c', 'start', '', DOUBAN_LOGIN_URL];
+  } else {
+    throw new Error('当前平台暂不支持自动打开浏览器登录流程');
   }
 
-  if (process.platform === 'linux') {
-    spawnSync('xdg-open', [DOUBAN_LOGIN_URL], { stdio: 'ignore' });
-    return;
+  const opened = spawnSync(command, args, { stdio: 'ignore' });
+  if (opened.error || opened.status !== 0) {
+    const message = opened.error?.message || `exit code ${opened.status ?? 'unknown'}`;
+    throw new Error(`打开浏览器失败: ${message}`);
   }
-
-  if (process.platform === 'win32') {
-    spawnSync('cmd', ['/c', 'start', '', DOUBAN_LOGIN_URL], { stdio: 'ignore' });
-    return;
-  }
-
-  throw new Error('Unsupported platform for browser login flow');
 }
 
 async function waitForEnter(): Promise<void> {
@@ -245,7 +298,7 @@ function toSessionFromPuppeteerCookies(cookies: PuppeteerCookie[]): AuthSession 
 
   for (const cookie of cookies) {
     if (!cookie?.name || typeof cookie.value !== 'string') continue;
-    if (cookie.name === 'dbcl2' && !dbcl2) dbcl2 = cookie.value;
+    if (cookie.name === 'dbcl2' && !dbcl2) dbcl2 = cookie.value.replace(/^"|"$/g, '');
     if (cookie.name === 'ck' && !ck) ck = cookie.value;
   }
 

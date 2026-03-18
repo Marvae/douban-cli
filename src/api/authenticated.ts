@@ -1,4 +1,4 @@
-import { BASE, UA, cleanText, fetchHtml } from './common.js';
+import { BASE, FETCH_TIMEOUT_MS, UA, cleanText, fetchHtml } from './common.js';
 import { formEncode } from '../utils/parsing.js';
 
 type InterestStatus = 'collect' | 'wish' | 'do';
@@ -6,6 +6,10 @@ type InterestStatus = 'collect' | 'wish' | 'do';
 interface DoubanJsonResponse {
   r?: number;
   msg?: string;
+  status?: string;
+  ok?: boolean;
+  success?: boolean;
+  error?: string;
   [key: string]: unknown;
 }
 
@@ -44,28 +48,35 @@ export interface ReviewCreateResult {
   url: string;
 }
 
-const FETCH_TIMEOUT_MS = 30000;
-
-function parseJsonResponse(text: string): DoubanJsonResponse {
+function parseJsonResponse(text: string): DoubanJsonResponse | null {
   try {
     return JSON.parse(text) as DoubanJsonResponse;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[authenticated] JSON 解析失败: ${message}`);
-    return {};
+    return null;
   }
 }
 
 function parseApiError(res: Response, text: string): string {
   const parsed = parseJsonResponse(text);
-  if (typeof parsed.msg === 'string' && parsed.msg.trim()) {
+  if (parsed && typeof parsed.msg === 'string' && parsed.msg.trim()) {
     return parsed.msg.trim();
   }
   return `HTTP ${res.status}: ${text.slice(0, 120)}`;
 }
 
 function parseJsonApiResult(text: string): DoubanJsonResponse {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw new Error('豆瓣接口返回空响应');
+  }
+
   const parsed = parseJsonResponse(text);
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error(`豆瓣接口返回非 JSON 对象: ${trimmed.slice(0, 120)}`);
+  }
+
   if (typeof parsed.r === 'number') {
     if (parsed.r !== 0) {
       throw new Error(parsed.msg || `豆瓣接口错误 code=${String(parsed.code || 'unknown')}`);
@@ -73,9 +84,43 @@ function parseJsonApiResult(text: string): DoubanJsonResponse {
     return parsed;
   }
 
-  const trimmed = text.trim();
-  if (!trimmed) return parsed;
-  throw new Error(`豆瓣接口返回异常: ${trimmed.slice(0, 120)}`);
+  const hasNegativeSignals =
+    parsed.ok === false
+    || parsed.success === false
+    || (typeof parsed.status === 'string' && ['fail', 'failed', 'error'].includes(parsed.status.trim().toLowerCase()));
+
+  if (typeof parsed.status === 'string') {
+    const normalized = parsed.status.trim().toLowerCase();
+    if (normalized === 'ok' || normalized === 'success') {
+      return parsed;
+    }
+    if (normalized === 'fail' || normalized === 'failed' || normalized === 'error') {
+      throw new Error(parsed.msg || parsed.error || `豆瓣接口错误 status=${parsed.status}`);
+    }
+  }
+
+  if (typeof parsed.ok === 'boolean' && parsed.ok) {
+    return parsed;
+  }
+
+  if (typeof parsed.success === 'boolean' && parsed.success) {
+    return parsed;
+  }
+
+  if (hasNegativeSignals) {
+    throw new Error(parsed.msg || parsed.error || '豆瓣接口返回失败状态');
+  }
+
+  if (typeof parsed.msg === 'string' && parsed.msg.trim()) {
+    throw new Error(parsed.msg.trim());
+  }
+
+  if (typeof parsed.error === 'string' && parsed.error.trim()) {
+    throw new Error(parsed.error.trim());
+  }
+
+  // 某些豆瓣接口成功时仅返回对象片段，不包含显式成功字段，且无失败信号。
+  return parsed;
 }
 
 async function postForm(url: string, data: Record<string, string>, cookies: string, referer: string): Promise<DoubanJsonResponse> {
@@ -113,7 +158,7 @@ function extractCkFromHtml(html: string): string {
   throw new Error('无法解析 ck token，请重新登录后重试');
 }
 
-async function resolveCk(cookies: string, existingCk?: string, subjectId?: string): Promise<string> {
+export async function resolveCk(cookies: string, existingCk?: string, subjectId?: string): Promise<string> {
   if (existingCk) return existingCk;
 
   if (subjectId) {
@@ -185,7 +230,7 @@ export async function createReview(
   existingCk?: string
 ): Promise<ReviewCreateResult> {
   const id = movieId.trim();
-  if (!/^\d+$/.test(id)) throw new Error('Movie ID must be numeric');
+  if (!/^\d+$/.test(id)) throw new Error('电影 ID 必须是纯数字');
   if (!title.trim()) throw new Error('长评标题不能为空');
   if (!content.trim()) throw new Error('长评内容不能为空');
 
@@ -212,7 +257,7 @@ export async function createReview(
 
 export async function unmarkSubject(movieId: string, cookies: string, existingCk?: string): Promise<void> {
   const id = movieId.trim();
-  if (!/^\d+$/.test(id)) throw new Error('Movie ID must be numeric');
+  if (!/^\d+$/.test(id)) throw new Error('电影 ID 必须是纯数字');
 
   const ck = await resolveCk(cookies, existingCk, id);
 

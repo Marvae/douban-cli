@@ -42,7 +42,12 @@ program.configureHelp({
 
       output += `${group}:\n`;
       for (const c of matched) {
-        output += `  ${c.name().padEnd(16)} ${c.description().replace('，需要登录', '').trim()}\n`;
+        const desc = c
+          .description()
+          .replace(/，?需要登录(?:\s*\[需登录\])?/g, ' [需登录]')
+          .replace(/\[需登录\]\s*\[需登录\]/g, '[需登录]')
+          .trim();
+        output += `  ${c.name().padEnd(16)} ${desc}\n`;
       }
       output += '\n';
     }

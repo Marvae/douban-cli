@@ -116,7 +116,7 @@ function parseMovieDetailFromHtml(id: string, html: string): MovieDetail | null 
  */
 export async function getMovieDetail(id: string): Promise<MovieDetail> {
   const movieId = id.trim();
-  if (!/^\d+$/.test(movieId)) throw new Error('Movie ID must be numeric');
+  if (!/^\d+$/.test(movieId)) throw new Error('电影 ID 必须是纯数字');
 
   const subjectUrl = `${BASE}/subject/${movieId}/`;
 
@@ -195,7 +195,7 @@ export async function getMovieDetail(id: string): Promise<MovieDetail> {
     console.error(`[movie] mobile API 回退失败: ${message}`);
   }
 
-  if (!detail.title) throw new Error(`Failed to fetch movie detail for id=${movieId}`);
+  if (!detail.title) throw new Error(`获取电影详情失败，ID=${movieId}`);
   return detail;
 }
 
@@ -206,9 +206,10 @@ export async function getMovieDetail(id: string): Promise<MovieDetail> {
  * @param limit - number of results
  */
 export async function getHot(type: 'movie' | 'tv', tag: string, limit = 20): Promise<Subject[]> {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
   const url = `${BASE}/j/search_subjects?type=${type}&tag=${encodeURIComponent(tag)}&page_limit=${limit}&page_start=0`;
   const data = await fetchJson<{ subjects: Subject[] }>(url);
-  return data.subjects;
+  return Array.isArray(data.subjects) ? data.subjects : [];
 }
 
 /**
@@ -217,8 +218,12 @@ export async function getHot(type: 'movie' | 'tv', tag: string, limit = 20): Pro
  * @param limit - number of results
  */
 export async function getRank(typeId: number, limit = 20): Promise<RankItem[]> {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
   const url = `${BASE}/j/chart/top_list?type=${typeId}&interval_id=100:90&start=0&limit=${limit}`;
-  return fetchJson<RankItem[]>(url);
+  const data = await fetchJson<RankItem[] | { data?: RankItem[] }>(url);
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.data)) return data.data;
+  return [];
 }
 
 /** Genre type mapping */
@@ -235,8 +240,9 @@ export const GENRES: Record<string, number> = {
  * Get Top250
  */
 export async function getTop250(start = 0, limit = 25): Promise<{ title: string; rating: string; url: string }[]> {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
   const results: { title: string; rating: string; url: string }[] = [];
-  const itemRegex = /<div class="item">[\s\S]*?<span class="title">([^<]+)<\/span>[\s\S]*?<span class="rating_num"[^>]*>([^<]+)<\/span>[\s\S]*?href="([^"]+)"/g;
+  const itemRegex = /<div class="item">[\s\S]*?href="([^"]+)"[\s\S]*?<span class="title">([^<]+)<\/span>[\s\S]*?<span class="rating_num"[^>]*>([^<]+)<\/span>/g;
 
   const seen = new Set<string>();
   let pageStart = Math.max(0, start);
@@ -247,14 +253,14 @@ export async function getTop250(start = 0, limit = 25): Promise<{ title: string;
     let addedThisPage = 0;
     let match;
     while ((match = itemRegex.exec(html)) !== null && results.length < limit) {
-      const itemUrl = match[3];
+      const itemUrl = match[1];
       if (seen.has(itemUrl)) continue;
       seen.add(itemUrl);
       addedThisPage += 1;
 
       results.push({
-        title: match[1],
-        rating: match[2],
+        title: match[2],
+        rating: match[3],
         url: itemUrl
       });
     }
@@ -290,8 +296,9 @@ export async function getNowPlaying(city = 'beijing'): Promise<{ title: string; 
  * Get coming soon movies from https://movie.douban.com/coming
  */
 export async function getComing(limit = 20): Promise<ComingItem[]> {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
   const html = await fetchHtml(`${BASE}/coming`, { Referer: BASE });
-  if (isChallengePage(html)) throw new Error('Coming page is blocked by anti-bot challenge');
+  if (isChallengePage(html)) throw new Error('即将上映页面触发了反爬挑战，暂时无法解析');
 
   const results: ComingItem[] = [];
   const rowRegex = /<tr>\s*<td>\s*([\s\S]*?)<\/td>\s*<td>\s*<a[^>]*href="https:\/\/movie\.douban\.com\/subject\/(\d+)\/"[^>]*>([\s\S]*?)<\/a>\s*<\/td>\s*<td>\s*([\s\S]*?)<\/td>\s*<td>\s*([\s\S]*?)<\/td>\s*<td>\s*([\s\S]*?)<\/td>\s*<\/tr>/g;
@@ -317,11 +324,12 @@ export async function getComing(limit = 20): Promise<ComingItem[]> {
  * Get weekly reputation chart from https://movie.douban.com/chart
  */
 export async function getWeekly(limit = 10): Promise<WeeklyItem[]> {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
   const html = await fetchHtml(`${BASE}/chart`, { Referer: BASE });
-  if (isChallengePage(html)) throw new Error('Weekly chart page is blocked by anti-bot challenge');
+  if (isChallengePage(html)) throw new Error('一周口碑榜页面触发了反爬挑战，暂时无法解析');
 
   const sectionMatch = html.match(/<h2>一周口碑榜[\s\S]*?<ul class="content" id="listCont2">([\s\S]*?)<\/ul>/);
-  if (!sectionMatch) throw new Error('Weekly chart section not found');
+  if (!sectionMatch) throw new Error('未找到一周口碑榜数据区域');
 
   const results: WeeklyItem[] = [];
   const itemRegex = /<li class="clearfix">[\s\S]*?<div class="no">(\d+)<\/div>[\s\S]*?<a[^>]*href="https:\/\/movie\.douban\.com\/subject\/(\d+)\/"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<div class="(stay|up|down)">(\d+)<\/div>[\s\S]*?<\/li>/g;
@@ -349,7 +357,9 @@ export async function getWeekly(limit = 10): Promise<WeeklyItem[]> {
  */
 export async function getReviews(movieId: string, start = 0, limit = 20): Promise<ReviewItem[]> {
   const id = movieId.trim();
-  if (!/^\d+$/.test(id)) throw new Error('Movie ID must be numeric');
+  if (!/^\d+$/.test(id)) throw new Error('电影 ID 必须是纯数字');
+  if (!Number.isFinite(start) || start < 0) throw new Error('start 必须是非负整数');
+  if (!Number.isFinite(limit) || limit <= 0) return [];
 
   interface ReviewResponse {
     reviews?: Array<{
@@ -395,7 +405,9 @@ export const CITIES: Record<string, string> = {
  */
 export async function getComments(movieId: string, orderBy: 'hot' | 'latest' = 'hot', start = 0, count = 20): Promise<CommentItem[]> {
   const id = movieId.trim();
-  if (!/^\d+$/.test(id)) throw new Error('Movie ID must be numeric');
+  if (!/^\d+$/.test(id)) throw new Error('电影 ID 必须是纯数字');
+  if (!Number.isFinite(start) || start < 0) throw new Error('start 必须是非负整数');
+  if (!Number.isFinite(count) || count <= 0) return [];
 
   interface Interest {
     id: string;
@@ -444,7 +456,7 @@ export interface RatingStats {
  */
 export async function getRatingStats(movieId: string): Promise<RatingStats> {
   const id = movieId.trim();
-  if (!/^\d+$/.test(id)) throw new Error('Movie ID must be numeric');
+  if (!/^\d+$/.test(id)) throw new Error('电影 ID 必须是纯数字');
 
   interface RatingResponse {
     stats?: number[];
@@ -466,7 +478,11 @@ export async function getRatingStats(movieId: string): Promise<RatingStats> {
     })
   ]);
 
-  const stats = ratingData.stats || [0, 0, 0, 0, 0];
+  const rawStats = Array.isArray(ratingData.stats) ? ratingData.stats : [];
+  const stats = new Array<number>(5).fill(0).map((_, index) => {
+    const value = rawStats[index];
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  });
 
   return {
     value: movieData.rating?.value || 0,

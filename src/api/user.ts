@@ -14,12 +14,15 @@ export async function getUserCollection(
   status: 'collect' | 'wish' | 'do' = 'collect',
   limit = 50
 ): Promise<UserCollectionItem[]> {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
+
   const results: UserCollectionItem[] = [];
   const seen = new Set<string>();
+  const encodedUserId = encodeURIComponent(userId.trim());
   let start = 0;
 
   while (results.length < limit) {
-    const html = await fetchHtml(`${BASE}/people/${userId}/${status}?start=${start}&sort=time&mode=list`);
+    const html = await fetchHtml(`${BASE}/people/${encodedUserId}/${status}?start=${start}&sort=time&mode=list`);
 
     const regex = /<div class="title">\s*<a href="https:\/\/movie\.douban\.com\/subject\/(\d+)\/">\s*([^<]+?)\s*<\/a>/g;
     let match;

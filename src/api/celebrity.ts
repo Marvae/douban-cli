@@ -58,7 +58,7 @@ function parsePersonageSidFromChallenge(html: string): string {
  */
 export async function getCelebrityDetail(id: string): Promise<CelebrityDetail> {
   const celebrityId = id.trim();
-  if (!/^\d+$/.test(celebrityId)) throw new Error('Celebrity ID must be numeric');
+  if (!/^\d+$/.test(celebrityId)) throw new Error('人物 ID 必须是纯数字');
 
   const celebrityUrl = `${BASE}/celebrity/${celebrityId}/`;
 
@@ -74,7 +74,7 @@ export async function getCelebrityDetail(id: string): Promise<CelebrityDetail> {
       });
 
       if (mobilePersonageHtml.includes('404 Oops')) {
-        throw new Error(`Personage page not found for sid=${sid}`);
+        throw new Error(`人物页面不存在 sid=${sid}`);
       }
 
       const titleMatch = mobilePersonageHtml.match(/<meta\s+property="og:title"\s+content="([^"]+)"\s*\/>/)
@@ -106,5 +106,5 @@ export async function getCelebrityDetail(id: string): Promise<CelebrityDetail> {
     console.error(`[celebrity] 获取人物详情失败: ${message}`);
   }
 
-  throw new Error(`Failed to fetch celebrity detail for id=${celebrityId}`);
+  throw new Error(`获取人物信息失败，ID=${celebrityId}`);
 }

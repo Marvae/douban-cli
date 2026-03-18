@@ -2,6 +2,7 @@ import {
   BOOK_BASE,
   cleanText,
   extractField,
+  extractWindowJsonObject,
   fetchHtml,
   isChallengePage,
   normalizeTitle
@@ -41,10 +42,10 @@ export interface BookDetail {
 }
 
 function parseBookSearchFromHtml(html: string, limit: number): BookSearchItem[] {
-  const dataMatch = html.match(/window\.__DATA__\s*=\s*(\{[\s\S]*?\});/);
-  if (!dataMatch) throw new Error('Book search data not found in HTML');
+  const rawData = extractWindowJsonObject(html, '__DATA__');
+  if (!rawData) throw new Error('图书搜索页未找到完整的 __DATA__ JSON 数据');
 
-  const data = JSON.parse(dataMatch[1]) as {
+  const data = JSON.parse(rawData) as {
     items?: Array<{
       tpl_name?: string;
       id?: string | number;
@@ -79,6 +80,8 @@ function parseBookSearchFromHtml(html: string, limit: number): BookSearchItem[] 
  * Get Douban Book Top250 list.
  */
 export async function getBookHot(start = 0, limit = 20): Promise<BookItem[]> {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
+
   const results: BookItem[] = [];
   const tableRegex = /<table width="100%">([\s\S]*?)<\/table>/g;
   const seen = new Set<string>();
@@ -86,7 +89,7 @@ export async function getBookHot(start = 0, limit = 20): Promise<BookItem[]> {
 
   while (results.length < limit) {
     const html = await fetchHtml(`${BOOK_BASE}/top250?start=${pageStart}`, { Referer: BOOK_BASE });
-    if (isChallengePage(html)) throw new Error('Book top page is blocked by anti-bot challenge');
+    if (isChallengePage(html)) throw new Error('图书 Top 页面触发了反爬挑战，暂时无法解析');
 
     let tableMatch;
     let addedThisPage = 0;
@@ -128,10 +131,11 @@ export async function getBookHot(start = 0, limit = 20): Promise<BookItem[]> {
 export async function searchBooks(keyword: string, start = 0, limit = 20): Promise<BookSearchItem[]> {
   const query = keyword.trim();
   if (!query) return [];
+  if (!Number.isFinite(limit) || limit <= 0) return [];
 
   const url = `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(query)}&cat=1001&start=${start}`;
   const html = await fetchHtml(url, { Referer: 'https://www.douban.com/' });
-  if (isChallengePage(html)) throw new Error('Book search page is blocked by anti-bot challenge');
+  if (isChallengePage(html)) throw new Error('图书搜索页面触发了反爬挑战，暂时无法解析');
 
   return parseBookSearchFromHtml(html, limit);
 }
@@ -141,14 +145,14 @@ export async function searchBooks(keyword: string, start = 0, limit = 20): Promi
  */
 export async function getBookInfo(id: string): Promise<BookDetail> {
   const bookId = id.trim();
-  if (!/^\d+$/.test(bookId)) throw new Error('Book ID must be numeric');
+  if (!/^\d+$/.test(bookId)) throw new Error('书籍 ID 必须是纯数字');
 
   const url = `${BOOK_BASE}/subject/${bookId}/`;
   const html = await fetchHtml(url, { Referer: BOOK_BASE });
-  if (isChallengePage(html)) throw new Error('Book detail page is blocked by anti-bot challenge');
+  if (isChallengePage(html)) throw new Error('书籍详情页面触发了反爬挑战，暂时无法解析');
 
   const titleMatch = html.match(/<span\s+property="v:itemreviewed"[^>]*>([\s\S]*?)<\/span>/);
-  if (!titleMatch) throw new Error(`Failed to parse book detail for id=${bookId}`);
+  if (!titleMatch) throw new Error(`解析书籍详情失败，ID=${bookId}`);
 
   const ratingMatch = html.match(/<strong[^>]*property="v:average"[^>]*>([\s\S]*?)<\/strong>/)
     || html.match(/<strong[^>]*class="[^"]*rating_num[^"]*"[^>]*>([\s\S]*?)<\/strong>/);
