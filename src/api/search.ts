@@ -10,6 +10,27 @@ export interface SearchItem {
   abstract?: string;
 }
 
+interface SubjectSuggestItem {
+  id?: string;
+  year?: string;
+}
+
+async function fetchSuggestYears(keyword: string): Promise<Map<string, string>> {
+  const url = `https://movie.douban.com/j/subject_suggest?q=${encodeURIComponent(keyword)}`;
+  const items = await fetchJson<SubjectSuggestItem[]>(url, {
+    Referer: 'https://movie.douban.com/'
+  });
+
+  const map = new Map<string, string>();
+  for (const item of items) {
+    const id = item.id ? String(item.id).trim() : '';
+    const year = item.year ? String(item.year).trim() : '';
+    if (!id || !year) continue;
+    map.set(id, year);
+  }
+  return map;
+}
+
 function parseSearchFromHtml(html: string, limit: number): SearchItem[] {
   const dataMatch = html.match(/window\.__DATA__\s*=\s*(\{[\s\S]*?\});/);
   if (!dataMatch) throw new Error('Search data not found in HTML');
@@ -53,6 +74,13 @@ export async function searchMovies(keyword: string, start = 0, limit = 20): Prom
   const query = keyword.trim();
   if (!query) return [];
 
+  let suggestYears = new Map<string, string>();
+  try {
+    suggestYears = await fetchSuggestYears(query);
+  } catch {
+    // Ignore suggest API failure.
+  }
+
   try {
     const apiUrl = `https://www.douban.com/j/search?q=${encodeURIComponent(query)}&start=${start}&cat=1002`;
     const data = await fetchJson<{ items?: Array<Record<string, unknown>> }>(apiUrl, {
@@ -82,12 +110,20 @@ export async function searchMovies(keyword: string, start = 0, limit = 20): Prom
       .filter((item) => item.id && item.title)
       .slice(0, limit);
 
-    if (items.length > 0) return items;
+    if (items.length > 0) {
+      return items.map((item) => ({
+        ...item,
+        year: suggestYears.get(item.id) || item.year
+      }));
+    }
   } catch {
     // Fallback to HTML parser below.
   }
 
   const pageUrl = `https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(query)}&cat=1002&start=${start}`;
   const html = await fetchHtml(pageUrl, { Referer: 'https://www.douban.com/' });
-  return parseSearchFromHtml(html, limit);
+  return parseSearchFromHtml(html, limit).map((item) => ({
+    ...item,
+    year: suggestYears.get(item.id) || item.year
+  }));
 }

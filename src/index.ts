@@ -6,6 +6,8 @@ import { registerListCommands } from './commands/list.js';
 import { registerMovieCommands } from './commands/movie.js';
 import { registerUserCommands } from './commands/user.js';
 import { registerMarkCommands } from './commands/mark.js';
+import { registerAuthCommands } from './commands/auth.js';
+import { registerSocialCommands } from './commands/social.js';
 import { handleProgramError } from './utils/error.js';
 
 const program = new Command();
@@ -23,7 +25,7 @@ program.configureHelp({
     const groups: Record<string, string[]> = {
       '电影': ['hot', 'tv', 'rank', 'top250', 'now', 'coming', 'weekly', 'movie', 'rating', 'reviews', 'comments', 'celebrity'],
       '书籍': ['book'],
-      '用户': ['me', 'user', 'mark', 'rate', 'comment', 'config', 'list'],
+      '用户': ['me', 'user', 'config', 'list', 'login', 'whoami', 'logout', 'mark', 'unmark', 'rate', 'comment', 'review', 'feed', 'stats', 'export', 'follow', 'unfollow'],
       '搜索': ['search']
     };
 
@@ -36,7 +38,7 @@ program.configureHelp({
 
       output += `${group}:\n`;
       for (const c of matched) {
-        output += `  ${c.name().padEnd(16)} ${c.description()}\n`;
+        output += `  ${c.name().padEnd(16)} ${c.description().replace('，需要登录', '').trim()}\n`;
       }
       output += '\n';
     }
@@ -56,7 +58,9 @@ registerBookCommands(program);
 registerUserCommands(program);
 registerCelebrityCommands(program);
 registerListCommands(program);
+registerAuthCommands(program);
 registerMarkCommands(program);
+registerSocialCommands(program);
 
 program.parseAsync().catch((error) => {
   handleProgramError(error);

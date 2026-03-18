@@ -1,257 +1,172 @@
 # douban-cli
 
-Douban CLI - browse movies, TV shows, search, and movie details from the terminal.
+Douban CLI - browse movies, TV shows, books, and personal collections from the terminal.
 
-豆瓣命令行工具：在终端查看热门电影/剧集、排行榜、Top250、正在热映、用户片单、搜索与电影详情。
+豆瓣命令行工具：在终端查看热门电影/剧集、排行榜、Top250、用户片单、书籍搜索与详情，并支持登录后进行标记、评分、评论、长评、导出和社交操作。
 
 ## Features / 功能
 
 ### Movies / 电影
-- 🔥 **Hot / 热门** - Trending movies and TV shows
-- 📺 **TV / 剧集** - TV lists by tag (美剧/日剧/韩剧/国产剧/综艺)
-- 🏆 **Rank / 排行** - Top movies by genre
-- 🎬 **Top250** - Douban Top 250 movies
-- 🍿 **Now Playing / 热映** - In-theater movies by city
-- 📅 **Coming / 即将上映** - Upcoming movies
-- 📈 **Weekly / 一周口碑** - Weekly reputation chart
-- 🔍 **Search / 搜索** - Search movies by keyword
-- 🧾 **Movie / 电影详情** - Rating, directors, actors, summary
-- ⭐ **Rating / 评分分布** - Rating distribution (5-star breakdown)
-- 💬 **Comments / 短评** - Hot short comments
-- 📝 **Reviews / 长评** - Long-form reviews
+- `hot` 热门电影/剧集
+- `tv` 按标签查看剧集
+- `rank` 类型高分排行
+- `top250` 豆瓣 Top 250
+- `now` 正在热映
+- `coming` 即将上映
+- `weekly` 一周口碑榜
+- `search` 电影搜索
+- `movie` 电影详情（支持 ID 或片名）
+- `rating` 评分分布
+- `comments` 短评
+- `reviews` 影评
 
 ### Books / 书籍
-- 📚 **Book Hot / 热门书籍** - Top 250 books
-- 🔍 **Book Search / 书籍搜索** - Search books by keyword
-- 📖 **Book Info / 书籍详情** - Book details
+- `book hot` 热门书籍
+- `book search` 搜索书籍
+- `book info` 书籍详情
 
-### Others / 其他
-- 👤 **User / 用户片单** - Watched / wish / doing lists
-- 🎭 **Celebrity / 影人** - Celebrity details
-- 🗂️ **List / 片单** - Hot douban lists
-- ⚙️ **Config / 配置** - Set default user ID
-- 👋 **Me / 我的** - Quick access to your collection
-- 🔐 **Mark/Rate/Comment** - Authenticated status updates, rating, and short comments
+### User / 用户
+- `user` 指定用户片单
+- `me` 我的片单（配置用户 ID 或登录态自动识别）
+- `config` 本地配置
+- `list` 热门豆列
+- `celebrity` 影人信息
+
+### Auth & Social / 登录与社交
+- `login` 登录并缓存 Cookie
+- `whoami` 查看当前登录用户
+- `logout` 清除本地登录态
+- `mark` 标记想看/看过/在看
+- `unmark` 取消标记
+- `rate` 评分（1-5）
+- `comment` 发送短评
+- `review` 发布长评
+- `feed` 查看关注动态
+- `stats` 观影统计
+- `export` 导出观影记录
+- `follow` 关注用户
+- `unfollow` 取消关注
 
 ## Installation / 安装
+
+需要 Node.js 22 或更高版本。
 
 ```bash
 npm install -g @marvae24/douban-cli
 ```
 
-Or run directly / 或直接运行：
+或直接运行：
 
 ```bash
 npx @marvae24/douban-cli hot
 ```
 
-## Usage / 用法
+## Requirements / 运行要求
 
-### Hot / 热门
+- Node.js `>= 22`
+- 支持的浏览器（用于自动提取登录态）：Chrome / Edge / Firefox / Safari
+
+## Usage / 常用命令
+
+### 基础查询
 
 ```bash
-# 热门电影
-
 douban hot
-
-# 热门剧集
-
 douban hot --tv
-
-# 指定标签与数量
-
-douban hot --tag 最新 --limit 10
-```
-
-### TV / 剧集
-
-```bash
-# 美剧 / 日剧 / 韩剧 / 国产剧 / 综艺
-
 douban tv 美剧 --limit 10
-```
-
-### Rank / 类型排行
-
-```bash
-# 科幻 / 动作 / 爱情 / 悬疑 ...
-
-douban rank 科幻 --limit 10
-```
-
-### Top250
-
-```bash
-douban top250 --limit 25
-```
-
-### Now Playing / 正在热映
-
-```bash
-# 默认北京
-
-douban now
-
-# 指定城市（北京/上海/广州/深圳/苏州/杭州/南京/成都/武汉/西安/重庆/天津）
-
+douban rank 科幻 --limit 20
+douban top250 --limit 50
 douban now --city 上海
-```
-
-### User / 用户片单
-
-```bash
-# 看过
-
-douban user YOUR_USER_ID
-
-# 想看
-
-douban user YOUR_USER_ID --wish
-
-# 在看
-
-douban user YOUR_USER_ID --doing
-```
-
-### Search / 电影搜索
-
-```bash
-# 搜索电影关键词
-
-douban search "奥本海默"
-
-# 分页
-
-douban search "星际" --start 20 --limit 10
-```
-
-### Movie / 电影详情
-
-```bash
-# 按豆瓣 subject ID 查询
-
-douban movie 35593344
-```
-
-### Rating / 评分分布
-
-```bash
-# 查看评分分布（5星/4星/3星...占比）
-
-douban rating 1291546
-```
-
-### Comments / 短评
-
-```bash
-# 热门短评
-
-douban comments 1291546
-
-# 最新短评
-
-douban comments 1291546 --latest
-```
-
-### Reviews / 长评
-
-```bash
-# 热门影评
-
-douban reviews 1291546 --limit 5
-```
-
-### Coming / 即将上映
-
-```bash
 douban coming --limit 10
-```
-
-### Weekly / 一周口碑
-
-```bash
 douban weekly
 ```
 
-### Book / 书籍
+### 搜索与详情
 
 ```bash
-# 热门书籍
+douban search "奥本海默"
+douban movie 35593344
+douban movie "沙丘"
+douban rating 1291546
+douban comments 1291546 --latest
+douban reviews 1291546 --limit 5
+```
 
-douban book hot
+### 书籍
 
-# 搜索书籍
-
+```bash
+douban book hot --limit 10
 douban book search "三体"
-
-# 书籍详情
-
 douban book info 2567698
 ```
 
-### Celebrity / 影人
+### 用户与配置
 
 ```bash
-douban celebrity 1054395
-```
-
-### List / 片单
-
-```bash
+douban user USER_ID
+douban user USER_ID --wish
+douban config --user USER_ID
+douban me
+douban me --doing
 douban list --limit 10
 ```
 
-### Config / 配置
+### 登录与身份
 
 ```bash
-# 设置默认用户 ID
-
-douban config --user YOUR_USER_ID
-
-# 然后可以直接用 me 命令
-
-douban me
-douban me --wish
+douban login
+douban whoami
+douban logout
 ```
 
-### JSON Output / JSON 输出
+### 标记/评分/评论（需登录）
 
 ```bash
-# 所有命令均支持 --json
-
-douban search "奥本海默" --json
-douban movie 35593344 --json
-```
-
-### Mark / Rate / Comment (需要登录)
-
-```bash
-# 自动提取浏览器 Cookie（dbcl2）后标记
-
 douban mark 1292052 --wish
 douban mark 1292052 --watched
 douban mark 1292052 --watching
-
-# 打分 1-5
+douban unmark 1292052
 
 douban rate 1292052 --score 5
-
-# 写短评
-
 douban comment 1292052 "值得二刷"
+douban review 1292052 "标题" "长评正文"
+```
 
-# 批量：默认随机 1-2 秒延迟，可用 --delay 覆盖
+### 批量操作（需登录）
 
+```bash
 douban mark --file ids.txt --wish
-douban rate --file rate.csv --score 5
+douban unmark --file ids.txt --delay 1.5
+douban rate --file rate.csv
 douban comment --file comments.csv --delay 1.5
 ```
 
-## Tech Stack
+文件格式：
+- `ids.txt`: 每行一个电影 ID
+- `rate.csv`: 每行 `<id>,<score>`（`score` 为 `1-5`）
+- `comments.csv`: 每行 `<id>,<comment>`（也支持制表符分隔）
 
-- TypeScript
-- Node.js 18+
-- Commander.js
+### 社交与数据（需登录）
+
+```bash
+douban feed --limit 10
+douban stats --year 2026
+douban export --format json -o douban-export.json
+douban export --format csv -o douban-export.csv
+
+douban follow USER_ID
+douban unfollow USER_ID
+```
+
+### JSON 输出
+
+所有命令都支持 `--json`：
+
+```bash
+douban search "沙丘" --json
+douban whoami --json
+douban export --format json --output export.json
+```
 
 ## License
 

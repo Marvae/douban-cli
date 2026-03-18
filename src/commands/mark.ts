@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { ensureAuth } from '../auth.js';
 import { BASE, UA, fetchHtml } from '../api/common.js';
+import { unmarkSubject } from '../api/index.js';
 import { withErrorHandler } from '../utils/error.js';
 import { withSpinner } from '../utils/spinner.js';
 
@@ -186,7 +187,7 @@ function selectInterestFromOptions(opts: { wish?: boolean; watched?: boolean; wa
 export function registerMarkCommands(program: Command): void {
   program
     .command('mark [id]')
-    .description('标记电影状态（想看/看过/在看），需要登录')
+    .description('标记电影状态（想看/看过/在看），需要登录 [需登录]')
     .option('--wish', '标记为“想看”')
     .option('--watched', '标记为“看过”')
     .option('--watching', '标记为“在看”')
@@ -237,7 +238,7 @@ export function registerMarkCommands(program: Command): void {
 
   program
     .command('rate [id]')
-    .description('给电影评分（1-5），需要登录')
+    .description('给电影评分（1-5），需要登录 [需登录]')
     .option('--score <score>', '单条模式评分（1-5）')
     .option('--file <path>', '批量模式：每行 <id>,<score>')
     .option('--delay <seconds>', '批量请求间隔（秒），默认随机 1-2 秒')
@@ -295,7 +296,7 @@ export function registerMarkCommands(program: Command): void {
 
   program
     .command('comment [id] [text]')
-    .description('发布短评，需要登录')
+    .description('发布短评，需要登录 [需登录]')
     .option('--file <path>', '批量模式：每行 <id>,<comment>')
     .option('--delay <seconds>', '批量请求间隔（秒），默认随机 1-2 秒')
     .option('--json', '以 JSON 输出')
@@ -327,6 +328,59 @@ export function registerMarkCommands(program: Command): void {
           );
           results.push({ id: item.id, ok: true });
           if (!opts.json) console.log(`✓ ${item.id} -> commented`);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          results.push({ id: item.id, ok: false, error: message });
+          if (!opts.json) console.error(`✗ ${item.id}: ${message}`);
+        }
+
+        const delayMs = nextDelayMs(i, items.length, delaySeconds);
+        if (delayMs > 0) await sleep(delayMs);
+      }
+
+      if (opts.json) {
+        console.log(JSON.stringify(results, null, 2));
+        return;
+      }
+
+      const okCount = results.filter((r) => r.ok).length;
+      console.log(`done: ${okCount}/${results.length}`);
+      if (okCount !== results.length) process.exitCode = 1;
+    }));
+
+  program
+    .command('unmark [id]')
+    .description('取消标记（想看/看过/在看），需要登录 [需登录]')
+    .option('--file <path>', '批量模式：每行一个条目 ID')
+    .option('--delay <seconds>', '批量请求间隔（秒），默认随机 1-2 秒')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'unmark',
+      suggestion: '可尝试：douban unmark 1292052'
+    }, async (id: string | undefined, opts) => {
+      if (!id && !opts.file) {
+        console.log('\n🗑️  取消标记 - 请指定电影 ID\n');
+        console.log('用法: douban unmark <电影ID>\n');
+        console.log('批量: douban unmark --file ids.txt\n');
+        console.log('示例: douban unmark 1292052');
+        return;
+      }
+      const delaySeconds = parseDelaySeconds(opts.delay);
+      const items = opts.file ? parseIdFile(String(opts.file)) : [{ id: parseNumericId(id || '') }];
+
+      const auth = await withSpinner('正在检查登录状态...', () => ensureAuth(), !opts.json);
+      const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        try {
+          await withSpinner(
+            `正在取消标记 ${item.id}...`,
+            () => unmarkSubject(item.id, auth.cookies, auth.ck),
+            !opts.json
+          );
+          results.push({ id: item.id, ok: true });
+          if (!opts.json) console.log(`✓ ${item.id} -> unmarked`);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           results.push({ id: item.id, ok: false, error: message });

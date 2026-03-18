@@ -1,8 +1,8 @@
 import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes } from 'node:crypto';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 
@@ -26,6 +26,8 @@ interface EncryptedAuthCache {
 
 const AUTH_CACHE_PATH = path.join(os.homedir(), '.douban-cli-auth.json');
 const DOUBAN_LOGIN_URL = 'https://accounts.douban.com/passport/login';
+
+type PuppeteerCookie = { name?: string; value?: string };
 
 function machineSecret(): Buffer {
   const payload = `${os.userInfo().username}|${os.hostname()}|${os.homedir()}|douban-cli`;
@@ -95,6 +97,17 @@ function saveAuthCache(auth: AuthSession): void {
   writeFileSync(AUTH_CACHE_PATH, `${JSON.stringify(encrypted, null, 2)}\n`, { mode: 0o600 });
 }
 
+export function clearAuthCache(): void {
+  if (!existsSync(AUTH_CACHE_PATH)) return;
+  unlinkSync(AUTH_CACHE_PATH);
+}
+
+export function getCachedAuthSession(clear = false): AuthSession | null {
+  const cached = readAuthCache();
+  if (clear) clearAuthCache();
+  return cached;
+}
+
 function buildCookieHeader(dbcl2: string, ck?: string): string {
   const parts = [`dbcl2=${dbcl2}`];
   if (ck) parts.push(`ck=${ck}`);
@@ -111,254 +124,83 @@ function createSession(dbcl2: string, ck: string | undefined, source: string): A
   };
 }
 
-function withTempSqliteCopy<T>(dbPath: string, fn: (tmpPath: string) => T): T {
-  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'douban-cli-cookie-'));
-  const tmpDbPath = path.join(tmpDir, path.basename(dbPath));
-  copyFileSync(dbPath, tmpDbPath);
-
-  const wal = `${dbPath}-wal`;
-  const shm = `${dbPath}-shm`;
-  if (existsSync(wal)) copyFileSync(wal, `${tmpDbPath}-wal`);
-  if (existsSync(shm)) copyFileSync(shm, `${tmpDbPath}-shm`);
-
-  try {
-    return fn(tmpDbPath);
-  } finally {
-    rmSync(tmpDir, { recursive: true, force: true });
-  }
+interface SweetCookieResult {
+  cookies: Array<{ name: string; value: string; source?: { browser?: string } }>;
+  warnings: string[];
 }
 
-function querySqliteRows(dbPath: string, sql: string): string[][] {
-  try {
-    const out = execFileSync('sqlite3', ['-readonly', '-separator', '\t', dbPath, sql], { encoding: 'utf8' });
-    return out
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => line.split('\t'));
-  } catch {
-    return [];
-  }
+interface PuppeteerPage {
+  goto(url: string, options?: { waitUntil?: string }): Promise<unknown>;
+  waitForFunction(pageFunction: string | (() => unknown), options?: { timeout?: number }): Promise<unknown>;
+  cookies(): Promise<PuppeteerCookie[]>;
 }
 
-function getKeychainPassword(service: string): string | null {
+interface PuppeteerBrowser {
+  newPage(): Promise<PuppeteerPage>;
+  close(): Promise<void>;
+}
+
+interface PuppeteerLaunchOptions {
+  headless?: boolean;
+  defaultViewport?: null | { width: number; height: number };
+}
+
+type PuppeteerLaunch = (options?: PuppeteerLaunchOptions) => Promise<PuppeteerBrowser>;
+
+type BrowserName = 'chrome' | 'edge' | 'firefox' | 'safari';
+
+function normalizeBrowserSource(source: string): string {
+  const lower = source.trim().toLowerCase();
+  if (!lower) return 'Browser';
+
+  const mapping: Record<string, string> = {
+    chrome: 'Chrome',
+    edge: 'Edge',
+    firefox: 'Firefox',
+    safari: 'Safari'
+  };
+
+  return mapping[lower] || source.charAt(0).toUpperCase() + source.slice(1);
+}
+
+async function extractFromBrowsers(): Promise<AuthSession | null> {
+  // 使用 sweet-cookie 库提取浏览器 cookie（支持 Chrome/Edge/Firefox/Safari）
+  let getCookies: (options: { url: string; browsers?: BrowserName[] }) => Promise<SweetCookieResult>;
+  
   try {
-    const value = execFileSync('security', ['find-generic-password', '-wa', service], { encoding: 'utf8' }).trim();
-    return value || null;
+    const mod = await import('@steipete/sweet-cookie');
+    getCookies = mod.getCookies;
   } catch {
+    // sweet-cookie 未安装，返回 null
     return null;
   }
-}
 
-function decryptChromiumEncryptedValue(encryptedHex: string, keychainService: string): string {
-  if (!encryptedHex) return '';
-
-  const raw = Buffer.from(encryptedHex, 'hex');
-  if (raw.length === 0) return '';
-
-  if (
-    raw.length > 3
-    && (raw.subarray(0, 3).equals(Buffer.from('v10')) || raw.subarray(0, 3).equals(Buffer.from('v11')))
-  ) {
-    const password = getKeychainPassword(keychainService);
-    if (!password) return '';
-
-    try {
-      const key = pbkdf2Sync(Buffer.from(password, 'utf8'), Buffer.from('saltysalt', 'utf8'), 1003, 16, 'sha1');
-      const iv = Buffer.alloc(16, 0x20);
-      const decipher = createDecipheriv('aes-128-cbc', key, iv);
-      decipher.setAutoPadding(true);
-      const decrypted = Buffer.concat([decipher.update(raw.subarray(3)), decipher.final()]);
-      return decrypted.toString('utf8');
-    } catch {
-      return '';
-    }
-  }
-
-  return raw.toString('utf8');
-}
-
-function extractFromChromium(cookiesPath: string, source: string, keychainService: string): AuthSession | null {
-  if (!existsSync(cookiesPath)) return null;
-
-  return withTempSqliteCopy(cookiesPath, (tmpDbPath) => {
-    const rows = querySqliteRows(
-      tmpDbPath,
-      "SELECT name, value, hex(encrypted_value) FROM cookies WHERE host_key LIKE '%douban.com%' AND name IN ('dbcl2','ck') ORDER BY last_access_utc DESC"
-    );
+  try {
+    const result = await getCookies({
+      url: 'https://www.douban.com',
+      browsers: ['chrome', 'edge', 'firefox', 'safari']
+    });
 
     let dbcl2 = '';
     let ck = '';
+    let source = 'Browser';
 
-    for (const [name, value = '', encryptedHex = ''] of rows) {
-      const finalValue = value || decryptChromiumEncryptedValue(encryptedHex, keychainService);
-      if (!finalValue) continue;
-      if (name === 'dbcl2' && !dbcl2) dbcl2 = finalValue;
-      if (name === 'ck' && !ck) ck = finalValue;
+    for (const cookie of result.cookies) {
+      if (cookie.name === 'dbcl2' && !dbcl2) {
+        dbcl2 = cookie.value.replace(/^"|"$/g, '');
+        source = cookie.source?.browser || 'Browser';
+      }
+      if (cookie.name === 'ck' && !ck) {
+        ck = cookie.value;
+      }
       if (dbcl2 && ck) break;
     }
 
     if (!dbcl2) return null;
-    return createSession(dbcl2, ck || undefined, source);
-  });
-}
-
-function extractFromFirefox(): AuthSession | null {
-  const profilesRoot = path.join(os.homedir(), 'Library', 'Application Support', 'Firefox', 'Profiles');
-  if (!existsSync(profilesRoot)) return null;
-
-  const dirs = readdirSync(profilesRoot, { withFileTypes: true });
-  const cookiePaths = dirs
-    .filter((dir) => dir.isDirectory())
-    .map((dir) => path.join(profilesRoot, dir.name, 'cookies.sqlite'))
-    .filter((candidate) => existsSync(candidate));
-
-  for (const cookiesPath of cookiePaths) {
-    const found = withTempSqliteCopy(cookiesPath, (tmpDbPath) => {
-      const rows = querySqliteRows(
-        tmpDbPath,
-        "SELECT name, value FROM moz_cookies WHERE host LIKE '%douban.com%' AND name IN ('dbcl2','ck') ORDER BY lastAccessed DESC"
-      );
-
-      let dbcl2 = '';
-      let ck = '';
-
-      for (const [name, value = ''] of rows) {
-        if (!value) continue;
-        if (name === 'dbcl2' && !dbcl2) dbcl2 = value;
-        if (name === 'ck' && !ck) ck = value;
-      }
-
-      if (!dbcl2) return null;
-      return createSession(dbcl2, ck || undefined, 'Firefox');
-    });
-
-    if (found) return found;
+    return createSession(dbcl2, ck || undefined, normalizeBrowserSource(source));
+  } catch {
+    return null;
   }
-
-  return null;
-}
-
-function readCString(buffer: Buffer, start: number): string {
-  let end = start;
-  while (end < buffer.length && buffer[end] !== 0) end += 1;
-  return buffer.toString('utf8', start, end);
-}
-
-function parseSafariBinaryCookies(filePath: string): Array<{ domain: string; name: string; value: string }> {
-  const buffer = readFileSync(filePath);
-  if (buffer.length < 8 || buffer.toString('ascii', 0, 4) !== 'cook') return [];
-
-  const pageCount = buffer.readUInt32BE(4);
-  let offset = 8;
-  const pageSizes: number[] = [];
-
-  for (let i = 0; i < pageCount; i += 1) {
-    if (offset + 4 > buffer.length) return [];
-    pageSizes.push(buffer.readUInt32BE(offset));
-    offset += 4;
-  }
-
-  const cookies: Array<{ domain: string; name: string; value: string }> = [];
-
-  for (const pageSize of pageSizes) {
-    if (offset + pageSize > buffer.length) break;
-    const page = buffer.subarray(offset, offset + pageSize);
-    offset += pageSize;
-
-    if (page.length < 8) continue;
-    const cookieCount = page.readUInt32LE(4);
-    if (cookieCount <= 0) continue;
-
-    const cookieOffsets: number[] = [];
-    let pointer = 8;
-    for (let i = 0; i < cookieCount; i += 1) {
-      if (pointer + 4 > page.length) break;
-      cookieOffsets.push(page.readUInt32LE(pointer));
-      pointer += 4;
-    }
-
-    for (const cookieOffset of cookieOffsets) {
-      if (cookieOffset + 32 > page.length) continue;
-      const size = page.readUInt32LE(cookieOffset);
-      if (size <= 0 || cookieOffset + size > page.length) continue;
-
-      const domainOffset = page.readUInt32LE(cookieOffset + 16);
-      const nameOffset = page.readUInt32LE(cookieOffset + 20);
-      const valueOffset = page.readUInt32LE(cookieOffset + 28);
-      const cookieData = page.subarray(cookieOffset, cookieOffset + size);
-
-      if (domainOffset >= cookieData.length || nameOffset >= cookieData.length || valueOffset >= cookieData.length) {
-        continue;
-      }
-
-      const domain = readCString(cookieData, domainOffset);
-      const name = readCString(cookieData, nameOffset);
-      const value = readCString(cookieData, valueOffset);
-
-      if (!domain || !name) continue;
-      cookies.push({ domain, name, value });
-    }
-  }
-
-  return cookies;
-}
-
-function extractFromSafari(): AuthSession | null {
-  const candidates = [
-    path.join(os.homedir(), 'Library', 'Containers', 'com.apple.Safari', 'Data', 'Library', 'Cookies', 'Cookies.binarycookies'),
-    path.join(os.homedir(), 'Library', 'Cookies', 'Cookies.binarycookies')
-  ];
-
-  for (const cookieFile of candidates) {
-    if (!existsSync(cookieFile)) continue;
-
-    try {
-      const rows = parseSafariBinaryCookies(cookieFile).filter(
-        (item) => item.domain.includes('douban.com') && (item.name === 'dbcl2' || item.name === 'ck')
-      );
-
-      let dbcl2 = '';
-      let ck = '';
-      for (const row of rows) {
-        if (row.name === 'dbcl2' && !dbcl2) dbcl2 = row.value;
-        if (row.name === 'ck' && !ck) ck = row.value;
-      }
-
-      if (dbcl2) return createSession(dbcl2, ck || undefined, 'Safari');
-    } catch {
-      // Continue with next candidate.
-    }
-  }
-
-  return null;
-}
-
-function extractFromBrowsers(): AuthSession | null {
-  if (process.platform !== 'darwin') return null;
-
-  const chromiumCandidates = [
-    {
-      source: 'Chrome',
-      cookiesPath: path.join(os.homedir(), 'Library', 'Application Support', 'Google', 'Chrome', 'Default', 'Cookies'),
-      keychainService: 'Chrome Safe Storage'
-    },
-    {
-      source: 'Edge',
-      cookiesPath: path.join(os.homedir(), 'Library', 'Application Support', 'Microsoft Edge', 'Default', 'Cookies'),
-      keychainService: 'Microsoft Edge Safe Storage'
-    }
-  ];
-
-  for (const browser of chromiumCandidates) {
-    const found = extractFromChromium(browser.cookiesPath, browser.source, browser.keychainService);
-    if (found) return found;
-  }
-
-  const firefox = extractFromFirefox();
-  if (firefox) return firefox;
-
-  return extractFromSafari();
 }
 
 function openLoginPage(): void {
@@ -389,25 +231,98 @@ async function waitForEnter(): Promise<void> {
   }
 }
 
-export async function ensureAuth(): Promise<AuthSession> {
-  const cached = readAuthCache();
-  if (cached) return cached;
+function toSessionFromPuppeteerCookies(cookies: PuppeteerCookie[]): AuthSession | null {
+  let dbcl2 = '';
+  let ck = '';
 
-  const extracted = extractFromBrowsers();
-  if (extracted) {
-    saveAuthCache(extracted);
-    return extracted;
+  for (const cookie of cookies) {
+    if (!cookie?.name || typeof cookie.value !== 'string') continue;
+    if (cookie.name === 'dbcl2' && !dbcl2) dbcl2 = cookie.value;
+    if (cookie.name === 'ck' && !ck) ck = cookie.value;
   }
 
-  console.log('未检测到可用豆瓣登录态，正在打开浏览器登录页面...');
+  if (!dbcl2) return null;
+  return createSession(dbcl2, ck || undefined, 'Puppeteer');
+}
+
+async function extractFromPuppeteerBrowserLogin(): Promise<AuthSession | null> {
+  let puppeteerModule: unknown;
+  try {
+    const dynamicImport = new Function('modulePath', 'return import(modulePath)') as (modulePath: string) => Promise<unknown>;
+    puppeteerModule = await dynamicImport('puppeteer');
+  } catch {
+    return null;
+  }
+
+  const launch = (puppeteerModule as { default?: { launch?: PuppeteerLaunch }; launch?: PuppeteerLaunch }).default?.launch
+    || (puppeteerModule as { launch?: PuppeteerLaunch }).launch;
+  if (typeof launch !== 'function') return null;
+
+  let browser: PuppeteerBrowser | null = null;
+
+  try {
+    browser = await launch({
+      headless: false,
+      defaultViewport: null
+    });
+
+    const page = await browser.newPage();
+    await page.goto(DOUBAN_LOGIN_URL, { waitUntil: 'domcontentloaded' });
+
+    await page.waitForFunction(
+      () => document.cookie.includes('dbcl2='),
+      { timeout: 180000 }
+    );
+
+    const cookies = await page.cookies();
+    return toSessionFromPuppeteerCookies(cookies as PuppeteerCookie[]);
+  } catch {
+    return null;
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch {
+        // Ignore browser close errors; login result has already been determined.
+      }
+    }
+  }
+}
+
+export async function loginWithBrowser(): Promise<AuthSession> {
+  const fromPuppeteer = await extractFromPuppeteerBrowserLogin();
+  if (fromPuppeteer) {
+    saveAuthCache(fromPuppeteer);
+    return fromPuppeteer;
+  }
+
   openLoginPage();
   await waitForEnter();
 
-  const retried = extractFromBrowsers();
-  if (!retried) {
+  const extracted = await extractFromBrowsers();
+  if (!extracted) {
     throw new Error('登录后仍未提取到 dbcl2 Cookie，请确认已在浏览器完成登录。');
   }
 
-  saveAuthCache(retried);
-  return retried;
+  saveAuthCache(extracted);
+  return extracted;
+}
+
+export async function detectAuthSession(): Promise<AuthSession | null> {
+  const cached = readAuthCache();
+  if (cached) return cached;
+
+  const extracted = await extractFromBrowsers();
+  if (!extracted) return null;
+
+  saveAuthCache(extracted);
+  return extracted;
+}
+
+export async function ensureAuth(): Promise<AuthSession> {
+  const detected = await detectAuthSession();
+  if (detected) return detected;
+
+  console.log('未检测到可用豆瓣登录态，正在打开浏览器登录页面...');
+  return loginWithBrowser();
 }

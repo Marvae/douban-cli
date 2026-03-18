@@ -5,3 +5,4 @@ export * from './user.js';
 export * from './celebrity.js';
 export * from './list.js';
 export * from './search.js';
+export * from './authenticated.js';

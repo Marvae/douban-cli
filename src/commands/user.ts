@@ -2,7 +2,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { Command } from 'commander';
-import { getUserCollection } from '../api/index.js';
+import { detectAuthSession, getCachedAuthSession } from '../auth.js';
+import { getCurrentUserProfile, getUserCollection } from '../api/index.js';
 import { withErrorHandler } from '../utils/error.js';
 import { withSpinner } from '../utils/spinner.js';
 
@@ -11,6 +12,15 @@ type CliConfig = {
 };
 
 const CONFIG_PATH = path.join(os.homedir(), '.douban-cli.json');
+
+function parsePositiveInt(value: string | undefined, optionName: string, fallback: number): number {
+  if (typeof value === 'undefined') return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${optionName} 必须是正整数`);
+  }
+  return parsed;
+}
 
 function readConfig(): CliConfig {
   if (!existsSync(CONFIG_PATH)) return {};
@@ -43,6 +53,9 @@ export function registerUserCommands(program: Command): void {
       if (!userId) {
         console.log('\n👤 用户片单 - 请指定用户 ID\n');
         console.log('用法: douban user <用户ID>\n');
+        console.log('如何找到用户 ID:');
+        console.log('  打开豆瓣个人主页 URL，例如 https://www.douban.com/people/xxx/');
+        console.log('  其中 /people/ 后面的 xxx 就是用户 ID\n');
         console.log('选项:');
         console.log('  --wish   想看列表');
         console.log('  --doing  在看列表');
@@ -52,10 +65,11 @@ export function registerUserCommands(program: Command): void {
       }
       const status = opts.wish ? 'wish' : opts.doing ? 'do' : 'collect';
       const statusLabel = opts.wish ? '想看' : opts.doing ? '在看' : '看过';
+      const limit = parsePositiveInt(opts.limit, '--limit', 30);
 
       const items = await withSpinner(
         `正在获取用户 ${userId} 的${statusLabel}片单...`,
-        () => getUserCollection(userId, status, parseInt(opts.limit, 10)),
+        () => getUserCollection(userId, status, limit),
         !opts.json
       );
 
@@ -89,7 +103,14 @@ export function registerUserCommands(program: Command): void {
         console.log(JSON.stringify(current, null, 2));
       } else {
         console.log(`\n⚙️  配置文件: ${CONFIG_PATH}`);
-        console.log(`user: ${current.user || '-'}`);
+        if (current.user) {
+          console.log(`默认用户 ID: ${current.user}`);
+          console.log('可直接运行: douban me');
+        } else {
+          console.log('默认用户 ID: 未设置');
+          console.log('设置方式: douban config --user <用户ID>');
+          console.log('用户 ID 可从个人主页 URL /people/xxx/ 中获取');
+        }
       }
     }));
 
@@ -102,25 +123,49 @@ export function registerUserCommands(program: Command): void {
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler({
       command: 'me',
-      suggestion: '请先运行 douban config --user <id> 设置默认用户'
+      suggestion: '可先运行 douban login 或 douban config --user <id>'
     }, async (opts) => {
       const config = readConfig();
-      if (!config.user) {
-        throw new Error('未配置默认用户');
+      let userId = config.user?.trim();
+
+      if (!userId) {
+        const cached = getCachedAuthSession();
+        if (cached) {
+          try {
+            const profile = await withSpinner('正在识别当前登录用户...', () => getCurrentUserProfile(cached.cookies), !opts.json);
+            userId = profile.id;
+          } catch {
+            // Fallback to interactive auth check below.
+          }
+        }
+      }
+
+      if (!userId) {
+        try {
+          const auth = await detectAuthSession();
+          if (!auth) {
+            throw new Error('NO_AUTH');
+          }
+          const profile = await withSpinner('正在识别当前登录用户...', () => getCurrentUserProfile(auth.cookies), !opts.json);
+          userId = profile.id;
+        } catch {
+          throw new Error('未配置默认用户，也未检测到登录 Cookie。请先运行 douban login 或 douban config --user <id>');
+        }
       }
 
       const status = opts.wish ? 'wish' : opts.doing ? 'do' : 'collect';
       const statusLabel = opts.wish ? '想看' : opts.doing ? '在看' : '看过';
+      const limit = parsePositiveInt(opts.limit, '--limit', 30);
       const items = await withSpinner(
         `正在获取我的${statusLabel}片单...`,
-        () => getUserCollection(config.user as string, status, parseInt(opts.limit, 10)),
+        () => getUserCollection(userId as string, status, limit),
         !opts.json
       );
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
       } else {
-        console.log(`\n🙋 我的片单 (${config.user}) ${statusLabel}\n`);
+        console.log(`\n🙋 我的片单 (${userId}) ${statusLabel}\n`);
         items.forEach((item, i) => {
           console.log(`${(i + 1).toString().padStart(2)}. ${item.title}`);
         });

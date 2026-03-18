@@ -127,6 +127,27 @@ function formatRegion(values: string[] | undefined): string {
   return values.join('/');
 }
 
+function isNumericId(value: string): boolean {
+  return /^\d+$/.test(value.trim());
+}
+
+function parseNonNegativeInt(value: string | undefined, optionName: string, fallback: number): number {
+  if (typeof value === 'undefined') return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${optionName} 必须是非负整数`);
+  }
+  return parsed;
+}
+
+function parsePositiveInt(value: string | undefined, optionName: string, fallback: number): number {
+  const parsed = parseNonNegativeInt(value, optionName, fallback);
+  if (parsed <= 0) {
+    throw new Error(`${optionName} 必须大于 0`);
+  }
+  return parsed;
+}
+
 export function registerMovieCommands(program: Command): void {
   program
     .command('hot')
@@ -140,10 +161,11 @@ export function registerMovieCommands(program: Command): void {
       options: '标签：热门、美剧、日剧、韩剧、国产剧、综艺、最新',
       suggestion: '可尝试：douban hot -t 热门'
     }, async (opts) => {
+      const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const type = opts.tv ? 'tv' : 'movie';
       const items = await withSpinner(
         `正在获取热门${opts.tv ? '剧集' : '电影'}...`,
-        () => getHot(type, opts.tag, parseInt(opts.limit, 10)),
+        () => getHot(type, opts.tag, limit),
         !opts.json
       );
 
@@ -177,9 +199,10 @@ export function registerMovieCommands(program: Command): void {
         console.log('示例: douban tv 美剧');
         return;
       }
+      const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const items = await withSpinner(
         `正在获取${tag}剧集...`,
-        () => getHot('tv', tag, parseInt(opts.limit, 10)),
+        () => getHot('tv', tag, limit),
         !opts.json
       );
 
@@ -219,6 +242,7 @@ export function registerMovieCommands(program: Command): void {
         console.log('\n示例: douban rank 科幻');
         return;
       }
+      const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const typeId = GENRES[genre];
       if (!typeId) {
         console.log(`\n❌ 未知类型: ${genre}\n`);
@@ -234,7 +258,7 @@ export function registerMovieCommands(program: Command): void {
 
       const items = await withSpinner(
         `正在获取${genre}排行...`,
-        () => getRank(typeId, parseInt(opts.limit, 10)),
+        () => getRank(typeId, limit),
         !opts.json
       );
 
@@ -262,9 +286,10 @@ export function registerMovieCommands(program: Command): void {
       command: 'top250',
       suggestion: '可尝试：douban top250 -n 50'
     }, async (opts) => {
+      const limit = parsePositiveInt(opts.limit, '--limit', 25);
       const items = await withSpinner(
         '正在获取豆瓣 Top 250...',
-        () => getTop250(0, parseInt(opts.limit, 10)),
+        () => getTop250(0, limit),
         !opts.json
       );
 
@@ -326,9 +351,11 @@ export function registerMovieCommands(program: Command): void {
         console.log('示例: douban search 沙丘');
         return;
       }
+      const start = parseNonNegativeInt(opts.start, '--start', 0);
+      const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const items = await withSpinner(
         `正在搜索“${keyword}”...`,
-        () => searchMovies(keyword, parseInt(opts.start, 10), parseInt(opts.limit, 10)),
+        () => searchMovies(keyword, start, limit),
         !opts.json
       );
 
@@ -353,7 +380,7 @@ export function registerMovieCommands(program: Command): void {
 
   program
     .command('movie [id]')
-    .description('按电影 ID 获取详情')
+    .description('按电影 ID 或片名获取详情')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
       command: 'movie',
@@ -367,9 +394,22 @@ export function registerMovieCommands(program: Command): void {
         console.log('示例: douban movie 1292052');
         return;
       }
+
+      let movieId = id.trim();
+      if (!isNumericId(movieId)) {
+        const result = await searchMovies(movieId, 0, 1);
+        if (result.length === 0 || !result[0]?.id) {
+          throw new Error(`未找到电影：${movieId}`);
+        }
+        movieId = result[0].id;
+        if (!opts.json) {
+          console.log(`\n🔎 已匹配为: ${result[0].title} (${movieId})`);
+        }
+      }
+
       const detail = await withSpinner(
         '正在获取电影详情...',
-        () => getMovieDetail(id),
+        () => getMovieDetail(movieId),
         !opts.json
       );
 
@@ -443,9 +483,10 @@ export function registerMovieCommands(program: Command): void {
       command: 'coming',
       suggestion: '可尝试：douban coming -n 30'
     }, async (opts) => {
+      const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const items = await withSpinner(
         '正在获取即将上映电影...',
-        () => getComing(parseInt(opts.limit, 10)),
+        () => getComing(limit),
         !opts.json
       );
 
@@ -473,9 +514,10 @@ export function registerMovieCommands(program: Command): void {
       command: 'weekly',
       suggestion: '可尝试：douban weekly'
     }, async (opts) => {
+      const limit = parsePositiveInt(opts.limit, '--limit', 10);
       const items = await withSpinner(
         '正在获取一周口碑榜...',
-        () => getWeekly(parseInt(opts.limit, 10)),
+        () => getWeekly(limit),
         !opts.json
       );
 
@@ -514,9 +556,11 @@ export function registerMovieCommands(program: Command): void {
         console.log('示例: douban reviews 1292052');
         return;
       }
+      const start = parseNonNegativeInt(opts.start, '--start', 0);
+      const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const items = await withSpinner(
         '正在获取热门影评...',
-        () => getReviews(movieId, parseInt(opts.start, 10), parseInt(opts.limit, 10)),
+        () => getReviews(movieId, start, limit),
         !opts.json
       );
 
@@ -554,9 +598,11 @@ export function registerMovieCommands(program: Command): void {
         return;
       }
       const orderBy = opts.latest ? 'latest' : 'hot';
+      const start = parseNonNegativeInt(opts.start, '--start', 0);
+      const limit = parsePositiveInt(opts.limit, '--limit', 10);
       const items = await withSpinner(
         `正在获取${opts.latest ? '最新' : '热门'}短评...`,
-        () => getComments(movieId, orderBy, parseInt(opts.start, 10), parseInt(opts.limit, 10)),
+        () => getComments(movieId, orderBy, start, limit),
         !opts.json
       );
 
