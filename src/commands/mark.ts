@@ -34,6 +34,17 @@ interface BatchResult {
 }
 
 const INTEREST_PATH = (id: string) => `${BASE}/j/subject/${id}/interest`;
+const CK_ERROR_PATTERNS: RegExp[] = [
+  /\bck\b/i,
+  /invalid\s*token/i,
+  /token\s*invalid/i,
+  /token\s*expired/i,
+  /ck\s*expired/i,
+  /ck[^\n]{0,20}(?:无效|过期)/i,
+  /(?:无效|过期)[^\n]{0,20}ck/i,
+  /请先登录/i,
+  /更新[^\n]{0,20}登录状态/i
+];
 
 function parseNumericId(value: string): string {
   const id = value.trim();
@@ -100,52 +111,66 @@ async function submitInterest(
   cookieHeader: string,
   existingCk?: string
 ): Promise<InterestResponse> {
-  const ck = await resolveCk(cookieHeader, existingCk, id);
-  const form = formEncode({
-    interest: payload.interest,
-    rating: payload.rating ? String(payload.rating) : '',
-    comment: payload.comment ? payload.comment : '',
-    ck
-  });
+  const send = async (ck: string): Promise<InterestResponse> => {
+    const form = formEncode({
+      interest: payload.interest,
+      rating: payload.rating ? String(payload.rating) : '',
+      comment: payload.comment ? payload.comment : '',
+      ck
+    });
 
-  const res = await fetch(INTEREST_PATH(id), {
-    method: 'POST',
-    headers: {
-      'User-Agent': UA,
-      Cookie: cookieHeader,
-      Referer: `${BASE}/subject/${id}/`,
-      Origin: BASE,
-      'X-Requested-With': 'XMLHttpRequest',
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
-    },
-    body: form,
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
-  });
+    const res = await fetch(INTEREST_PATH(id), {
+      method: 'POST',
+      headers: {
+        'User-Agent': UA,
+        Cookie: cookieHeader,
+        Referer: `${BASE}/subject/${id}/`,
+        Origin: BASE,
+        'X-Requested-With': 'XMLHttpRequest',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+      },
+      body: form,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    });
 
-  const text = await res.text();
-  let parsed: InterestResponse | null = null;
+    const text = await res.text();
+    let parsed: InterestResponse | null = null;
+    try {
+      parsed = JSON.parse(text) as InterestResponse;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[mark] 解析兴趣接口 JSON 失败: ${message}`);
+      parsed = null;
+    }
+
+    if (!res.ok) {
+      const message = parsed?.msg || `HTTP ${res.status}: ${text.slice(0, 120)}`;
+      throw new Error(message);
+    }
+
+    if (!parsed || typeof parsed.r !== 'number') {
+      throw new Error(`返回结果异常: ${text.slice(0, 120)}`);
+    }
+
+    if (parsed.r !== 0) {
+      throw new Error(parsed.msg || `豆瓣接口错误 code=${parsed.code ?? 'unknown'}`);
+    }
+
+    return parsed;
+  };
+
+  const initialCk = await resolveCk(cookieHeader, existingCk, id);
   try {
-    parsed = JSON.parse(text) as InterestResponse;
+    return await send(initialCk);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[mark] 解析兴趣接口 JSON 失败: ${message}`);
-    parsed = null;
-  }
+    if (!CK_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
+      throw error;
+    }
 
-  if (!res.ok) {
-    const message = parsed?.msg || `HTTP ${res.status}: ${text.slice(0, 120)}`;
-    throw new Error(message);
+    const refreshedCk = await resolveCk(cookieHeader, undefined, id, { forceRefresh: true });
+    return send(refreshedCk);
   }
-
-  if (!parsed || typeof parsed.r !== 'number') {
-    throw new Error(`返回结果异常: ${text.slice(0, 120)}`);
-  }
-
-  if (parsed.r !== 0) {
-    throw new Error(parsed.msg || `豆瓣接口错误 code=${parsed.code ?? 'unknown'}`);
-  }
-
-  return parsed;
 }
 
 function selectInterestFromOptions(opts: { wish?: boolean; watched?: boolean; watching?: boolean }): Interest {

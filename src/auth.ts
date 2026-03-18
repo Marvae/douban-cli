@@ -179,6 +179,12 @@ interface SweetCookieResult {
   warnings: string[];
 }
 
+interface BrowserCookieBucket {
+  source: string;
+  dbcl2?: string;
+  ck?: string;
+}
+
 interface PuppeteerPage {
   goto(url: string, options?: { waitUntil?: string }): Promise<unknown>;
   waitForFunction(pageFunction: string | (() => unknown), options?: { timeout?: number }): Promise<unknown>;
@@ -236,23 +242,33 @@ async function extractFromBrowsers(): Promise<AuthSession | null> {
       browsers: ['chrome', 'edge', 'firefox', 'safari']
     });
 
-    let dbcl2 = '';
-    let ck = '';
-    let source = 'Browser';
+    const grouped = new Map<string, BrowserCookieBucket>();
 
     for (const cookie of result.cookies) {
-      if (cookie.name === 'dbcl2' && !dbcl2) {
-        dbcl2 = cookie.value.replace(/^"|"$/g, '');
-        source = cookie.source?.browser || 'Browser';
+      if (!cookie?.name || typeof cookie.value !== 'string') continue;
+
+      const rawSource = cookie.source?.browser || 'browser';
+      const key = rawSource.trim().toLowerCase() || 'browser';
+      const source = normalizeBrowserSource(rawSource || 'Browser');
+      const bucket = grouped.get(key) || { source };
+
+      if (cookie.name === 'dbcl2' && !bucket.dbcl2) {
+        bucket.dbcl2 = cookie.value.replace(/^"|"$/g, '').trim();
       }
-      if (cookie.name === 'ck' && !ck) {
-        ck = cookie.value;
+
+      if (cookie.name === 'ck' && !bucket.ck) {
+        bucket.ck = cookie.value.trim();
       }
-      if (dbcl2 && ck) break;
+
+      grouped.set(key, bucket);
     }
 
-    if (!dbcl2) return null;
-    return createSession(dbcl2, ck || undefined, normalizeBrowserSource(source));
+    const buckets = [...grouped.values()];
+    const selected = buckets.find((bucket) => bucket.dbcl2 && bucket.ck)
+      || buckets.find((bucket) => bucket.dbcl2);
+
+    if (!selected?.dbcl2) return null;
+    return createSession(selected.dbcl2, selected.ck, selected.source);
   } catch (error) {
     reportRecoverableError('从浏览器提取 Cookie 失败', error);
     return null;

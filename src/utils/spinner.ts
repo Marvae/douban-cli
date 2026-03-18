@@ -19,8 +19,7 @@ export async function withSpinner<T>(text: string, fn: () => Promise<T>, enabled
     renderLine(`${FRAMES[0]} ${text}`);
     const result = await fn();
     clearInterval(timer);
-    renderLine(`✔ ${text}`);
-    process.stderr.write('\n');
+    process.stderr.write('\r\x1b[2K');
     return result;
   } catch (error) {
     clearInterval(timer);

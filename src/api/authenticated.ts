@@ -48,6 +48,29 @@ export interface ReviewCreateResult {
   url: string;
 }
 
+interface ResolveCkOptions {
+  forceRefresh?: boolean;
+}
+
+interface CkCacheEntry {
+  value: string;
+  expiresAt: number;
+}
+
+const CK_CACHE_TTL_MS = 30 * 60 * 1000;
+const ckCache = new Map<string, CkCacheEntry>();
+const CK_ERROR_PATTERNS: RegExp[] = [
+  /\bck\b/i,
+  /invalid\s*token/i,
+  /token\s*invalid/i,
+  /token\s*expired/i,
+  /ck\s*expired/i,
+  /ck[^\n]{0,20}(?:无效|过期)/i,
+  /(?:无效|过期)[^\n]{0,20}ck/i,
+  /请先登录/i,
+  /更新[^\n]{0,20}登录状态/i
+];
+
 function parseJsonResponse(text: string): DoubanJsonResponse | null {
   try {
     return JSON.parse(text) as DoubanJsonResponse;
@@ -145,6 +168,70 @@ async function postForm(url: string, data: Record<string, string>, cookies: stri
   return parseJsonApiResult(text);
 }
 
+function extractCookieValue(cookieHeader: string, name: string): string | undefined {
+  const pattern = new RegExp(`(?:^|;\\s*)${name}=([^;]+)`);
+  const match = cookieHeader.match(pattern);
+  if (!match?.[1]) return undefined;
+  return match[1].replace(/^"|"$/g, '').trim() || undefined;
+}
+
+function ckCacheKey(cookies: string): string {
+  const dbcl2 = extractCookieValue(cookies, 'dbcl2');
+  if (dbcl2) return `dbcl2:${dbcl2}`;
+  return `cookie:${cookies}`;
+}
+
+function getCachedCk(cookies: string): string | null {
+  const entry = ckCache.get(ckCacheKey(cookies));
+  if (!entry) return null;
+
+  if (entry.expiresAt <= Date.now()) {
+    ckCache.delete(ckCacheKey(cookies));
+    return null;
+  }
+
+  return entry.value;
+}
+
+function cacheCk(cookies: string, ck: string): void {
+  const value = ck.trim();
+  if (!value) return;
+
+  ckCache.set(ckCacheKey(cookies), {
+    value,
+    expiresAt: Date.now() + CK_CACHE_TTL_MS
+  });
+}
+
+function clearCachedCk(cookies: string): void {
+  ckCache.delete(ckCacheKey(cookies));
+}
+
+function isCkRelatedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.trim();
+  return CK_ERROR_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+async function withCkRetry<T>(
+  cookies: string,
+  existingCk: string | undefined,
+  subjectId: string | undefined,
+  action: (ck: string) => Promise<T>
+): Promise<T> {
+  const ck = await resolveCk(cookies, existingCk, subjectId);
+
+  try {
+    return await action(ck);
+  } catch (error) {
+    if (!isCkRelatedError(error)) throw error;
+
+    clearCachedCk(cookies);
+    const refreshedCk = await resolveCk(cookies, undefined, subjectId, { forceRefresh: true });
+    return action(refreshedCk);
+  }
+}
+
 function extractCkFromHtml(html: string): string {
   const input = html.match(/name=["']ck["']\s+value=["']([^"']+)["']/i);
   if (input?.[1]) return input[1];
@@ -158,22 +245,48 @@ function extractCkFromHtml(html: string): string {
   throw new Error('无法解析 ck token，请重新登录后重试');
 }
 
-export async function resolveCk(cookies: string, existingCk?: string, subjectId?: string): Promise<string> {
-  if (existingCk) return existingCk;
+export async function resolveCk(
+  cookies: string,
+  existingCk?: string,
+  subjectId?: string,
+  options: ResolveCkOptions = {}
+): Promise<string> {
+  const forceRefresh = options.forceRefresh === true;
+
+  if (!forceRefresh) {
+    const cached = getCachedCk(cookies);
+    if (cached) return cached;
+
+    const provided = existingCk?.trim();
+    if (provided) {
+      cacheCk(cookies, provided);
+      return provided;
+    }
+
+    const ckInCookieHeader = extractCookieValue(cookies, 'ck');
+    if (ckInCookieHeader) {
+      cacheCk(cookies, ckInCookieHeader);
+      return ckInCookieHeader;
+    }
+  }
 
   if (subjectId) {
     const subjectHtml = await fetchHtml(`${BASE}/subject/${subjectId}/`, {
       Referer: BASE,
       Cookie: cookies
     });
-    return extractCkFromHtml(subjectHtml);
+    const ck = extractCkFromHtml(subjectHtml);
+    cacheCk(cookies, ck);
+    return ck;
   }
 
   const homeHtml = await fetchHtml('https://www.douban.com/', {
     Referer: 'https://www.douban.com/',
     Cookie: cookies
   });
-  return extractCkFromHtml(homeHtml);
+  const ck = extractCkFromHtml(homeHtml);
+  cacheCk(cookies, ck);
+  return ck;
 }
 
 function parseMineAnchor(html: string): ProfileMatch | null {
@@ -192,28 +305,39 @@ function parseMineAnchor(html: string): ProfileMatch | null {
 
 function parseProfileFromHtml(html: string): CurrentUserProfile {
   const mine = parseMineAnchor(html);
-  if (mine?.id) {
-    return {
-      id: mine.id,
-      name: mine.name || mine.id,
-      url: `https://www.douban.com/people/${mine.id}/`
-    };
+  if (!mine?.id) {
+    throw new Error('当前页面未找到 lnk-mine，无法识别当前登录用户，请重新登录后重试');
   }
 
-  const idMatch = html.match(/https:\/\/www\.douban\.com\/people\/([^/"']+)\//);
-  if (!idMatch?.[1]) {
-    throw new Error('当前登录态未识别到用户信息，请先运行 douban login');
-  }
-
-  const id = idMatch[1];
   return {
-    id,
-    name: id,
-    url: `https://www.douban.com/people/${id}/`
+    id: mine.id,
+    name: mine.name || mine.id,
+    url: `https://www.douban.com/people/${mine.id}/`
   };
 }
 
 export async function getCurrentUserProfile(cookies: string): Promise<CurrentUserProfile> {
+  // 先尝试 /mine/ 页面，更可靠
+  const mineHtml = await fetchHtml('https://www.douban.com/mine/', {
+    Referer: 'https://www.douban.com/',
+    Cookie: cookies
+  });
+
+  // 从 /mine/ 页面提取用户 ID
+  const titleMatch = mineHtml.match(/<title>\s*([^<\n]+?)\s*<\/title>/);
+  const peopleMatch = mineHtml.match(/href=["']https:\/\/www\.douban\.com\/people\/([^/"']+)\//);
+
+  if (peopleMatch?.[1]) {
+    const id = peopleMatch[1];
+    const name = titleMatch?.[1]?.trim() || id;
+    return {
+      id,
+      name,
+      url: `https://www.douban.com/people/${id}/`
+    };
+  }
+
+  // 回退到首页 lnk-mine
   const html = await fetchHtml('https://www.douban.com/', {
     Referer: 'https://www.douban.com/',
     Cookie: cookies
@@ -234,101 +358,103 @@ export async function createReview(
   if (!title.trim()) throw new Error('长评标题不能为空');
   if (!content.trim()) throw new Error('长评内容不能为空');
 
-  const ck = await resolveCk(cookies, existingCk, id);
+  return withCkRetry(cookies, existingCk, id, async (ck) => {
+    const result = await postForm(
+      `${BASE}/j/review/create`,
+      {
+        ck,
+        subject_id: id,
+        title: title.trim(),
+        review: content.trim()
+      },
+      cookies,
+      `${BASE}/subject/${id}/`
+    );
 
-  const result = await postForm(
-    `${BASE}/j/review/create`,
-    {
-      ck,
-      subject_id: id,
-      title: title.trim(),
-      review: content.trim()
-    },
-    cookies,
-    `${BASE}/subject/${id}/`
-  );
-
-  const reviewId = String(result.id || '').trim();
-  return {
-    id: reviewId,
-    url: reviewId ? `${BASE}/review/${reviewId}/` : `${BASE}/subject/${id}/`
-  };
+    const reviewId = String(result.id || '').trim();
+    return {
+      id: reviewId,
+      url: reviewId ? `${BASE}/review/${reviewId}/` : `${BASE}/subject/${id}/`
+    };
+  });
 }
 
 export async function unmarkSubject(movieId: string, cookies: string, existingCk?: string): Promise<void> {
   const id = movieId.trim();
   if (!/^\d+$/.test(id)) throw new Error('电影 ID 必须是纯数字');
 
-  const ck = await resolveCk(cookies, existingCk, id);
-
-  try {
-    await postForm(
-      `${BASE}/j/subject/${id}/removeinterest`,
-      { ck },
-      cookies,
-      `${BASE}/subject/${id}/`
-    );
-    return;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[authenticated] removeinterest 失败，回退 interest=none: ${message}`);
-    await postForm(
-      `${BASE}/j/subject/${id}/interest`,
-      { ck, interest: 'none' },
-      cookies,
-      `${BASE}/subject/${id}/`
-    );
-  }
+  await withCkRetry(cookies, existingCk, id, async (ck) => {
+    try {
+      await postForm(
+        `${BASE}/j/subject/${id}/removeinterest`,
+        { ck },
+        cookies,
+        `${BASE}/subject/${id}/`
+      );
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[authenticated] removeinterest 失败，回退 interest=none: ${message}`);
+      await postForm(
+        `${BASE}/j/subject/${id}/interest`,
+        { ck, interest: 'none' },
+        cookies,
+        `${BASE}/subject/${id}/`
+      );
+    }
+  });
 }
 
 export async function followUser(userId: string, cookies: string, existingCk?: string): Promise<void> {
   const id = userId.trim();
   if (!id) throw new Error('用户 ID 不能为空');
-  const ck = await resolveCk(cookies, existingCk);
 
-  try {
-    await postForm(
-      `https://www.douban.com/j/contact/follow/${encodeURIComponent(id)}`,
-      { ck },
-      cookies,
-      'https://www.douban.com/'
-    );
-    return;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[authenticated] follow 接口失败，回退 add: ${message}`);
-    await postForm(
-      'https://www.douban.com/j/contact/add',
-      { ck, people_id: id },
-      cookies,
-      'https://www.douban.com/'
-    );
-  }
+  await withCkRetry(cookies, existingCk, undefined, async (ck) => {
+    try {
+      await postForm(
+        `https://www.douban.com/j/contact/follow/${encodeURIComponent(id)}`,
+        { ck },
+        cookies,
+        'https://www.douban.com/'
+      );
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[authenticated] follow 接口失败，回退 add: ${message}`);
+      await postForm(
+        'https://www.douban.com/j/contact/add',
+        { ck, people_id: id },
+        cookies,
+        'https://www.douban.com/'
+      );
+    }
+  });
 }
 
 export async function unfollowUser(userId: string, cookies: string, existingCk?: string): Promise<void> {
   const id = userId.trim();
   if (!id) throw new Error('用户 ID 不能为空');
-  const ck = await resolveCk(cookies, existingCk);
 
-  try {
-    await postForm(
-      `https://www.douban.com/j/contact/unfollow/${encodeURIComponent(id)}`,
-      { ck },
-      cookies,
-      'https://www.douban.com/'
-    );
-    return;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[authenticated] unfollow 接口失败，回退 remove: ${message}`);
-    await postForm(
-      'https://www.douban.com/j/contact/remove',
-      { ck, people_id: id },
-      cookies,
-      'https://www.douban.com/'
-    );
-  }
+  await withCkRetry(cookies, existingCk, undefined, async (ck) => {
+    try {
+      await postForm(
+        `https://www.douban.com/j/contact/unfollow/${encodeURIComponent(id)}`,
+        { ck },
+        cookies,
+        'https://www.douban.com/'
+      );
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[authenticated] unfollow 接口失败，回退 remove: ${message}`);
+      await postForm(
+        'https://www.douban.com/j/contact/remove',
+        { ck, people_id: id },
+        cookies,
+        'https://www.douban.com/'
+      );
+    }
+  });
 }
 
 export async function getFeed(cookies: string, limit = 20): Promise<FeedItem[]> {

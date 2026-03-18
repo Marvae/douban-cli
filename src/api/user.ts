@@ -1,4 +1,4 @@
-import { BASE, fetchHtml } from './common.js';
+import { BASE, fetchHtml, isChallengePage } from './common.js';
 
 export interface UserCollectionItem {
   title: string;
@@ -14,15 +14,23 @@ export async function getUserCollection(
   status: 'collect' | 'wish' | 'do' = 'collect',
   limit = 50
 ): Promise<UserCollectionItem[]> {
+  const trimmedUserId = userId.trim();
+  if (!trimmedUserId) {
+    throw new Error('用户 ID 不能为空');
+  }
   if (!Number.isFinite(limit) || limit <= 0) return [];
 
   const results: UserCollectionItem[] = [];
   const seen = new Set<string>();
-  const encodedUserId = encodeURIComponent(userId.trim());
+  const encodedUserId = encodeURIComponent(trimmedUserId);
   let start = 0;
 
   while (results.length < limit) {
     const html = await fetchHtml(`${BASE}/people/${encodedUserId}/${status}?start=${start}&sort=time&mode=list`);
+
+    if (isChallengePage(html)) {
+      throw new Error('触发豆瓣反爬挑战页面，无法继续获取用户片单，请稍后重试');
+    }
 
     const regex = /<div class="title">\s*<a href="https:\/\/movie\.douban\.com\/subject\/(\d+)\/">\s*([^<]+?)\s*<\/a>/g;
     let match;
