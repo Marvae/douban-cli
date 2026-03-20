@@ -95,11 +95,16 @@ export function registerBookCommands(program: Command): void {
         console.log(`ID: ${detail.id}`);
         console.log(`评分: ${detail.rating}`);
         console.log(`作者: ${detail.author}`);
+        console.log(`译者: ${detail.translator.length > 0 ? detail.translator.join(' / ') : '-'}`);
+        console.log(`副标题: ${detail.subtitle}`);
         console.log(`出版社: ${detail.publisher}`);
         console.log(`出版年: ${detail.pubdate}`);
         console.log(`页数: ${detail.pages}`);
         console.log(`定价: ${detail.price}`);
         console.log(`ISBN: ${detail.isbn}`);
+        console.log(`短评: ${detail.comment_count.toLocaleString()}`);
+        console.log(`书评: ${detail.review_count.toLocaleString()}`);
+        console.log(`标签: ${detail.tags.length > 0 ? detail.tags.join(' / ') : '-'}`);
         console.log(`\n简介:\n${detail.summary}`);
         console.log(`\n链接: ${detail.url}`);
       }

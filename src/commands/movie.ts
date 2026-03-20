@@ -141,6 +141,11 @@ function formatRegion(values: string[] | undefined): string {
   return values.join('/');
 }
 
+function formatDetailList(values: string[] | undefined): string {
+  if (!values || values.length === 0) return '-';
+  return values.join(' / ');
+}
+
 function normalizeMovieIdInput(value: string, fieldName = '电影 ID'): string {
   const id = value.trim();
   if (!isNumericId(id)) {
@@ -281,29 +286,66 @@ export function registerMovieCommands(program: Command): void {
   program
     .command('top250')
     .description('获取豆瓣 Top 250 电影')
-    .option('-n, --limit <n>', '返回数量', '25')
+    .option('-p, --page <n>', '页码（从 1 开始）', '1')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler({
       command: 'top250',
-      suggestion: '可尝试：douban top250 -n 50'
+      suggestion: '可尝试：douban top250 --page 2'
     }, async (opts) => {
-      const limit = parsePositiveInt(opts.limit, '--limit', 25);
-      const items = await withSpinner(
-        '正在获取豆瓣 Top 250...',
-        () => getTop250(0, limit),
-        !opts.json
-      );
+      let page = parsePositiveInt(opts.page, '--page', 1);
+      const total = 250;
+      const limit = 25;
 
       if (opts.json) {
+        const start = (page - 1) * limit;
+        const items = await withSpinner(
+          '正在获取豆瓣 Top 250...',
+          () => getTop250(start, limit),
+          false
+        );
         console.log(JSON.stringify(items, null, 2));
-      } else {
-        console.log('\n🎬 豆瓣 Top 250\n');
-        renderTable(items, [
-          { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
-          { header: '片名', value: (item) => item.title, minWidth: 18 },
-          { header: '评分', value: (item) => item.rating || '-' }
-        ]);
+        return;
       }
+
+      // 交互式翻页模式
+      const readline = await import('node:readline');
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const question = (q: string) => new Promise<string>((resolve) => rl.question(q, resolve));
+
+      let running = true;
+      while (running) {
+        const start = (page - 1) * limit;
+        const items = await withSpinner(
+          '正在获取豆瓣 Top 250...',
+          () => getTop250(start, limit),
+          true
+        );
+        const from = items.length > 0 ? start + 1 : 0;
+        const to = start + items.length;
+
+        console.log(`\n🎬 豆瓣 Top 250，当前显示第 ${from}-${to} 条\n`);
+        renderTable(items, [
+          { header: '#', value: (item) => String(item.rank), minWidth: 3 },
+          { header: '片名', value: (item) => item.title, minWidth: 14 },
+          { header: '年份', value: (item) => item.year || '-', minWidth: 4 },
+          { header: '评分', value: (item) => item.rating || '-', minWidth: 4 },
+          { header: '导演', value: (item) => item.director || '-', minWidth: 10 },
+          { header: '金句', value: (item) => item.quote || '-', minWidth: 16 }
+        ]);
+
+        if (to >= total) {
+          console.log('\n已到最后一页');
+          break;
+        }
+
+        const answer = await question('\n按回车加载下一页，输入 q 退出: ');
+        if (answer.toLowerCase() === 'q') {
+          running = false;
+        } else {
+          page++;
+        }
+      }
+      rl.close();
     }));
 
   program
@@ -333,8 +375,15 @@ export function registerMovieCommands(program: Command): void {
         console.log(`\n🎬 ${cityInput}正在热映\n`);
         renderTable(items, [
           { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
-          { header: '片名', value: (item) => item.title, minWidth: 18 },
-          { header: '评分', value: (item) => (item.score && item.score !== '-' ? item.score : '-') }
+          { header: '片名', value: (item) => item.title, minWidth: 14 },
+          { header: '评分', value: (item) => {
+            const score = item.score && item.score !== '0' && item.score !== '-' ? item.score : '-';
+            const count = item.vote_count > 0 ? (item.vote_count > 10000 ? `${(item.vote_count / 10000).toFixed(1)}万` : String(item.vote_count)) : '';
+            return count ? `${score} (${count})` : score;
+          }, minWidth: 10 },
+          { header: '导演', value: (item) => item.director || '-', minWidth: 8 },
+          { header: '时长', value: (item) => item.duration || '-', minWidth: 6 },
+          { header: '地区', value: (item) => item.region || '-', minWidth: 6 }
         ]);
       }
     }));
@@ -422,9 +471,18 @@ export function registerMovieCommands(program: Command): void {
       if (opts.json) {
         console.log(JSON.stringify(detail, null, 2));
       } else {
-        console.log(`\n🎬 ${detail.title}`);
+        const titleSuffix = detail.year ? ` (${detail.year})` : '';
+        const originalTitle = detail.original_title ? ` / ${detail.original_title}` : '';
+        console.log(`\n🎬 ${detail.title}${titleSuffix}${originalTitle}`);
         console.log(`ID: ${detail.id}`);
         console.log(`评分: ${detail.rating || '-'}`);
+        console.log(`类型: ${formatDetailList(detail.genres)}`);
+        console.log(`国家: ${formatDetailList(detail.countries)}`);
+        console.log(`时长: ${formatDetailList(detail.durations)}`);
+        console.log(`语言: ${formatDetailList(detail.languages)}`);
+        console.log(`短评: ${detail.comment_count.toLocaleString()}`);
+        console.log(`影评: ${detail.review_count.toLocaleString()}`);
+        console.log(`别名: ${formatDetailList(detail.aka)}`);
         console.log(`导演: ${detail.directors.length > 0 ? detail.directors.join(' / ') : '-'}`);
         console.log(`演员: ${detail.actors.length > 0 ? detail.actors.join(' / ') : '-'}`);
         console.log(`\n简介:\n${detail.summary || '-'}`);
@@ -549,13 +607,13 @@ export function registerMovieCommands(program: Command): void {
   program
     .command('reviews [movieId]')
     .description('按电影 ID 获取热门影评')
-    .option('-s, --start <n>', '起始偏移', '0')
+    .option('-p, --page <n>', '页码（从 1 开始）', '1')
     .option('-n, --limit <n>', '返回数量', '20')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
       command: 'reviews',
       target: `ID: ${String(args[0] || '未指定')}`,
-      suggestion: '可尝试：douban reviews 1292052 -n 10'
+      suggestion: '可尝试：douban reviews 1292052 --page 2'
     }), async (movieId, opts) => {
       if (!movieId) {
         console.log('\n📝 热门影评 - 请指定电影 ID\n');
@@ -564,40 +622,77 @@ export function registerMovieCommands(program: Command): void {
         return;
       }
       const id = normalizeMovieIdInput(movieId);
-      const start = parseNonNegativeInt(opts.start, '--start', 0);
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
-      const items = await withSpinner(
-        '正在获取热门影评...',
-        () => getReviews(id, start, limit),
-        !opts.json
-      );
+      let page = parsePositiveInt(opts.page, '--page', 1);
 
       if (opts.json) {
-        console.log(JSON.stringify(items, null, 2));
-      } else {
-        console.log(`\n💬 热门影评 (${id})\n`);
-        if (items.length === 0) {
-          console.log('未找到影评。');
-          return;
-        }
-        items.forEach((item, i) => {
-          console.log(`${(i + 1).toString().padStart(2)}. ${item.user} ⭐${item.rating} 👍${item.votes} ${item.time}`);
-          console.log(`    ${item.content}`);
-        });
+        // JSON 模式：单次输出
+        const start = (page - 1) * limit;
+        const { items, total } = await withSpinner(
+          '正在获取热门影评...',
+          () => getReviews(id, start, limit),
+          false
+        );
+        console.log(JSON.stringify({ items, total }, null, 2));
+        return;
       }
+
+      // 交互式翻页模式
+      const readline = await import('node:readline');
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const question = (q: string) => new Promise<string>((resolve) => rl.question(q, resolve));
+
+      let running = true;
+      while (running) {
+        const start = (page - 1) * limit;
+        const { items, total } = await withSpinner(
+          '正在获取热门影评...',
+          () => getReviews(id, start, limit),
+          true
+        );
+        const from = items.length > 0 ? start + 1 : 0;
+        const to = start + items.length;
+
+        console.log(`\n📝 热门影评 (${id})\n`);
+        console.log(`共 ${total.toLocaleString()} 条影评，当前显示第 ${from}-${to} 条\n`);
+
+        if (items.length === 0) {
+          console.log('暂无更多影评');
+          break;
+        }
+
+        items.forEach((item, i) => {
+          console.log(`${(start + i + 1).toString().padStart(2)}. ${item.user} ⭐${item.rating} 👍${item.votes} ${item.time}`);
+          console.log(`    ${item.content}\n`);
+        });
+
+        // 检查是否还有下一页
+        if (to >= total) {
+          console.log('已到最后一页');
+          break;
+        }
+
+        const answer = await question('按回车加载下一页，输入 q 退出: ');
+        if (answer.toLowerCase() === 'q') {
+          running = false;
+        } else {
+          page++;
+        }
+      }
+      rl.close();
     }));
 
   program
     .command('comments [movieId]')
     .description('按电影 ID 获取短评')
     .option('--latest', '按最新排序（默认按热门）')
-    .option('-s, --start <n>', '起始偏移', '0')
-    .option('-n, --limit <n>', '返回数量', '10')
+    .option('-p, --page <n>', '页码（从 1 开始）', '1')
+    .option('-n, --limit <n>', '返回数量', '20')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
       command: 'comments',
       target: `ID: ${String(args[0] || '未指定')}`,
-      suggestion: '可尝试：douban comments 1292052 --latest'
+      suggestion: '可尝试：douban comments 1292052 --page 2'
     }), async (movieId, opts) => {
       if (!movieId) {
         console.log('\n💬 短评 - 请指定电影 ID\n');
@@ -607,28 +702,65 @@ export function registerMovieCommands(program: Command): void {
       }
       const id = normalizeMovieIdInput(movieId);
       const orderBy = opts.latest ? 'latest' : 'hot';
-      const start = parseNonNegativeInt(opts.start, '--start', 0);
-      const limit = parsePositiveInt(opts.limit, '--limit', 10);
-      const items = await withSpinner(
-        `正在获取${opts.latest ? '最新' : '热门'}短评...`,
-        () => getComments(id, orderBy, start, limit),
-        !opts.json
-      );
+      const limit = parsePositiveInt(opts.limit, '--limit', 20);
+      let page = parsePositiveInt(opts.page, '--page', 1);
 
       if (opts.json) {
-        console.log(JSON.stringify(items, null, 2));
-      } else {
+        // JSON 模式：单次输出
+        const start = (page - 1) * limit;
+        const { items, total } = await withSpinner(
+          `正在获取${opts.latest ? '最新' : '热门'}短评...`,
+          () => getComments(id, orderBy, start, limit),
+          false
+        );
+        console.log(JSON.stringify({ items, total }, null, 2));
+        return;
+      }
+
+      // 交互式翻页模式
+      const readline = await import('node:readline');
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const question = (q: string) => new Promise<string>((resolve) => rl.question(q, resolve));
+
+      let running = true;
+      while (running) {
+        const start = (page - 1) * limit;
+        const { items, total } = await withSpinner(
+          `正在获取${opts.latest ? '最新' : '热门'}短评...`,
+          () => getComments(id, orderBy, start, limit),
+          true
+        );
+        const from = items.length > 0 ? start + 1 : 0;
+        const to = start + items.length;
+
         console.log(`\n💬 ${opts.latest ? '最新' : '热门'}短评 (${id})\n`);
+        console.log(`共 ${total.toLocaleString()} 条短评，当前显示第 ${from}-${to} 条\n`);
+
         if (items.length === 0) {
-          console.log('暂无短评');
-          return;
+          console.log('暂无更多短评');
+          break;
         }
+
         items.forEach((item, i) => {
           const stars = item.rating ? '⭐'.repeat(item.rating) : '';
-          console.log(`${(i + 1).toString().padStart(2)}. ${item.user} ${stars} 👍${item.votes}`);
+          console.log(`${(start + i + 1).toString().padStart(2)}. ${item.user} ${stars} 👍${item.votes}`);
           console.log(`    ${item.content}`);
           console.log(`    ${item.time}\n`);
         });
+
+        // 检查是否还有下一页
+        if (to >= total) {
+          console.log('已到最后一页');
+          break;
+        }
+
+        const answer = await question('按回车加载下一页，输入 q 退出: ');
+        if (answer.toLowerCase() === 'q') {
+          running = false;
+        } else {
+          page++;
+        }
       }
+      rl.close();
     }));
 }

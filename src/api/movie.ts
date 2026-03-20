@@ -1,4 +1,4 @@
-import { BASE, cleanText, fetchHtml, fetchJson, isChallengePage, normalizeTitle } from './common.js';
+import { BASE, cleanText, extractField, fetchHtml, fetchJson, isChallengePage, normalizeTitle } from './common.js';
 
 interface Subject {
   id: string;
@@ -24,9 +24,19 @@ interface RankItem {
 export interface MovieDetail {
   id: string;
   title: string;
+  year: string;
+  original_title: string;
   rating: string;
   directors: string[];
   actors: string[];
+  genres: string[];
+  countries: string[];
+  durations: string[];
+  languages: string[];
+  aka: string[];
+  pubdate: string[];
+  comment_count: number;
+  review_count: number;
   summary: string;
   url: string;
 }
@@ -70,11 +80,80 @@ export interface CommentItem {
   url: string;
 }
 
+export interface PaginatedResult<T> {
+  items: T[];
+  total: number;
+}
+
+function sanitizeList(values: unknown[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  values.forEach((value) => {
+    const text = cleanText(String(value || ''));
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    result.push(text);
+  });
+
+  return result;
+}
+
+function splitSlashList(raw: string): string[] {
+  return sanitizeList(raw.split('/').map((item) => item.trim()).filter(Boolean));
+}
+
+function parseCountFromText(raw: string): number {
+  const text = cleanText(raw).replace(/[，,]/g, '');
+  if (!text) return 0;
+
+  const wanMatch = text.match(/(\d+(?:\.\d+)?)\s*万/);
+  if (wanMatch) {
+    return Math.round(Number(wanMatch[1]) * 10000);
+  }
+
+  const numMatch = text.match(/(\d+)/);
+  return numMatch ? Number(numMatch[1]) : 0;
+}
+
+function extractCountByPath(html: string, path: 'comments' | 'reviews'): number {
+  const regex = new RegExp(`<a[^>]*href="[^"]*\\/${path}[^\"]*"[^>]*>([\\s\\S]*?)<\\/a>`, 'g');
+  let max = 0;
+  let match;
+
+  while ((match = regex.exec(html)) !== null) {
+    const count = parseCountFromText(match[1]);
+    if (count > max) max = count;
+  }
+
+  return max;
+}
+
+function normalizeArrayField(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return sanitizeList(value);
+  }
+  if (typeof value === 'string') {
+    return splitSlashList(value);
+  }
+  return [];
+}
+
+function assignArrayIfNotEmpty(target: MovieDetail, key: keyof Pick<MovieDetail, 'genres' | 'countries' | 'durations' | 'languages' | 'aka' | 'pubdate'>, value: unknown): void {
+  const list = normalizeArrayField(value);
+  if (list.length > 0) {
+    target[key] = list;
+  }
+}
+
 function parseMovieDetailFromHtml(id: string, html: string): MovieDetail | null {
   if (isChallengePage(html)) return null;
 
   const titleMatch = html.match(/<span\s+property="v:itemreviewed"[^>]*>([\s\S]*?)<\/span>/);
+  const yearMatch = html.match(/<span[^>]*class="year"[^>]*>([\s\S]*?)<\/span>/);
   const ratingMatch = html.match(/<strong[^>]*property="v:average"[^>]*>([\s\S]*?)<\/strong>/);
+  const infoMatch = html.match(/<div id="info"[^>]*>([\s\S]*?)<\/div>/);
+  const infoHtml = infoMatch ? infoMatch[1] : '';
 
   const directors: string[] = [];
   const directorRegex = /<a[^>]*rel="v:directedBy"[^>]*>([\s\S]*?)<\/a>/g;
@@ -90,6 +169,27 @@ function parseMovieDetailFromHtml(id: string, html: string): MovieDetail | null 
     actors.push(cleanText(actorMatch[1]));
   }
 
+  const genres: string[] = [];
+  const genreRegex = /<span[^>]*property="v:genre"[^>]*>([\s\S]*?)<\/span>/g;
+  let genreMatch;
+  while ((genreMatch = genreRegex.exec(html)) !== null) {
+    genres.push(cleanText(genreMatch[1]));
+  }
+
+  const durations: string[] = [];
+  const runtimeRegex = /<span[^>]*property="v:runtime"[^>]*>([\s\S]*?)<\/span>/g;
+  let runtimeMatch;
+  while ((runtimeMatch = runtimeRegex.exec(html)) !== null) {
+    durations.push(cleanText(runtimeMatch[1]));
+  }
+
+  const pubdate: string[] = [];
+  const pubdateRegex = /<span[^>]*property="v:initialReleaseDate"[^>]*>([\s\S]*?)<\/span>/g;
+  let pubdateMatch;
+  while ((pubdateMatch = pubdateRegex.exec(html)) !== null) {
+    pubdate.push(cleanText(pubdateMatch[1]));
+  }
+
   let summary = '';
   const summaryMatch = html.match(/<span[^>]*property="v:summary"[^>]*>([\s\S]*?)<\/span>/);
   if (summaryMatch) {
@@ -99,12 +199,30 @@ function parseMovieDetailFromHtml(id: string, html: string): MovieDetail | null 
   const title = titleMatch ? normalizeTitle(titleMatch[1]) : '';
   if (!title) return null;
 
+  const yearText = yearMatch ? cleanText(yearMatch[1]).match(/(19|20)\d{2}/)?.[0] || '' : '';
+  const originalTitle = extractField(infoHtml, '原名');
+  const countries = splitSlashList(extractField(infoHtml, '制片国家/地区'));
+  const languages = splitSlashList(extractField(infoHtml, '语言'));
+  const aka = splitSlashList(extractField(infoHtml, '又名'));
+  const durationsFromInfo = splitSlashList(extractField(infoHtml, '片长'));
+  const pubdateFromInfo = splitSlashList(extractField(infoHtml, '上映日期'));
+
   return {
     id,
     title,
+    year: yearText,
+    original_title: originalTitle || '',
     rating: ratingMatch ? cleanText(ratingMatch[1]) : '-',
     directors,
     actors,
+    genres: sanitizeList(genres),
+    countries,
+    durations: sanitizeList(durations.length > 0 ? durations : durationsFromInfo),
+    languages,
+    aka,
+    pubdate: sanitizeList(pubdate.length > 0 ? pubdate : pubdateFromInfo),
+    comment_count: extractCountByPath(html, 'comments'),
+    review_count: extractCountByPath(html, 'reviews'),
     summary,
     url: `${BASE}/subject/${id}/`
   };
@@ -132,9 +250,19 @@ export async function getMovieDetail(id: string): Promise<MovieDetail> {
   const detail: MovieDetail = {
     id: movieId,
     title: '',
+    year: '',
+    original_title: '',
     rating: '-',
     directors: [],
     actors: [],
+    genres: [],
+    countries: [],
+    durations: [],
+    languages: [],
+    aka: [],
+    pubdate: [],
+    comment_count: 0,
+    review_count: 0,
     summary: '',
     url: subjectUrl
   };
@@ -144,9 +272,19 @@ export async function getMovieDetail(id: string): Promise<MovieDetail> {
       r?: number;
       subject?: {
         title?: string;
+        year?: string;
+        original_title?: string;
         rate?: string;
         directors?: string[];
         actors?: string[];
+        genres?: string[];
+        countries?: string[];
+        durations?: string[];
+        languages?: string[];
+        aka?: string[];
+        pubdate?: string[];
+        comment_count?: number;
+        review_count?: number;
         url?: string;
       };
     }>(`${BASE}/j/subject_abstract?subject_id=${movieId}`, { Referer: BASE });
@@ -154,9 +292,23 @@ export async function getMovieDetail(id: string): Promise<MovieDetail> {
     const subject = abstract.subject;
     if (subject) {
       if (subject.title) detail.title = normalizeTitle(subject.title);
+      if (subject.year) detail.year = cleanText(subject.year);
+      if (subject.original_title) detail.original_title = normalizeTitle(subject.original_title);
       if (subject.rate) detail.rating = subject.rate;
       if (Array.isArray(subject.directors)) detail.directors = subject.directors.map((name) => cleanText(name));
       if (Array.isArray(subject.actors)) detail.actors = subject.actors.map((name) => cleanText(name));
+      assignArrayIfNotEmpty(detail, 'genres', subject.genres);
+      assignArrayIfNotEmpty(detail, 'countries', subject.countries);
+      assignArrayIfNotEmpty(detail, 'durations', subject.durations);
+      assignArrayIfNotEmpty(detail, 'languages', subject.languages);
+      assignArrayIfNotEmpty(detail, 'aka', subject.aka);
+      assignArrayIfNotEmpty(detail, 'pubdate', subject.pubdate);
+      if (typeof subject.comment_count === 'number' && Number.isFinite(subject.comment_count)) {
+        detail.comment_count = Math.max(0, Math.trunc(subject.comment_count));
+      }
+      if (typeof subject.review_count === 'number' && Number.isFinite(subject.review_count)) {
+        detail.review_count = Math.max(0, Math.trunc(subject.review_count));
+      }
       if (subject.url) detail.url = subject.url;
     }
   } catch (error) {
@@ -167,16 +319,28 @@ export async function getMovieDetail(id: string): Promise<MovieDetail> {
   try {
     const mobile = await fetchJson<{
       title?: string;
+      year?: string | number;
+      original_title?: string;
       intro?: string;
       rating?: { value?: number };
       directors?: Array<{ name?: string }>;
       actors?: Array<{ name?: string }>;
+      genres?: string[];
+      countries?: string[];
+      durations?: string[];
+      languages?: string[];
+      aka?: string[];
+      pubdate?: string[];
+      comment_count?: number;
+      review_count?: number;
       url?: string;
     }>(`https://m.douban.com/rexxar/api/v2/movie/${movieId}`, {
       Referer: `https://m.douban.com/movie/subject/${movieId}/`
     });
 
     if (mobile.title) detail.title = normalizeTitle(mobile.title);
+    if (mobile.year) detail.year = cleanText(String(mobile.year));
+    if (mobile.original_title) detail.original_title = normalizeTitle(mobile.original_title);
     if (typeof mobile.rating?.value === 'number') detail.rating = mobile.rating.value.toFixed(1);
     if (Array.isArray(mobile.directors) && mobile.directors.length > 0) {
       detail.directors = mobile.directors
@@ -187,6 +351,18 @@ export async function getMovieDetail(id: string): Promise<MovieDetail> {
       detail.actors = mobile.actors
         .map((person) => cleanText(person.name || ''))
         .filter(Boolean);
+    }
+    assignArrayIfNotEmpty(detail, 'genres', mobile.genres);
+    assignArrayIfNotEmpty(detail, 'countries', mobile.countries);
+    assignArrayIfNotEmpty(detail, 'durations', mobile.durations);
+    assignArrayIfNotEmpty(detail, 'languages', mobile.languages);
+    assignArrayIfNotEmpty(detail, 'aka', mobile.aka);
+    assignArrayIfNotEmpty(detail, 'pubdate', mobile.pubdate);
+    if (typeof mobile.comment_count === 'number' && Number.isFinite(mobile.comment_count)) {
+      detail.comment_count = Math.max(0, Math.trunc(mobile.comment_count));
+    }
+    if (typeof mobile.review_count === 'number' && Number.isFinite(mobile.review_count)) {
+      detail.review_count = Math.max(0, Math.trunc(mobile.review_count));
     }
     if (mobile.intro) detail.summary = cleanText(mobile.intro);
     if (mobile.url) detail.url = mobile.url;
@@ -239,34 +415,69 @@ export const GENRES: Record<string, number> = {
 /**
  * Get Top250
  */
-export async function getTop250(start = 0, limit = 25): Promise<{ title: string; rating: string; url: string }[]> {
-  if (!Number.isFinite(limit) || limit <= 0) return [];
-  const results: { title: string; rating: string; url: string }[] = [];
-  const itemRegex = /<div class="item">[\s\S]*?href="([^"]+)"[\s\S]*?<span class="title">([^<]+)<\/span>[\s\S]*?<span class="rating_num"[^>]*>([^<]+)<\/span>/g;
+export interface Top250Item {
+  rank: number;
+  title: string;
+  year: string;
+  rating: string;
+  director: string;
+  quote: string;
+  url: string;
+}
 
+export async function getTop250(start = 0, limit = 25): Promise<Top250Item[]> {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
+  const results: Top250Item[] = [];
   const seen = new Set<string>();
   let pageStart = Math.max(0, start);
 
   while (results.length < limit) {
     const html = await fetchHtml(`${BASE}/top250?start=${pageStart}`);
 
-    let addedThisPage = 0;
-    let match;
-    while ((match = itemRegex.exec(html)) !== null && results.length < limit) {
-      const itemUrl = match[1];
-      if (seen.has(itemUrl)) continue;
-      seen.add(itemUrl);
-      addedThisPage += 1;
+    // Split by item blocks
+    const items = html.split('<div class="item">').slice(1);
+    if (items.length === 0) break;
+
+    for (const item of items) {
+      if (results.length >= limit) break;
+
+      // Extract rank
+      const rankMatch = item.match(/<em[^>]*>(\d+)<\/em>/);
+      const rank = rankMatch ? Number(rankMatch[1]) : 0;
+
+      // Extract URL and title
+      const urlMatch = item.match(/href="(https:\/\/movie\.douban\.com\/subject\/\d+\/)"/);
+      const titleMatch = item.match(/<span class="title">([^<]+)<\/span>/);
+      if (!urlMatch || !titleMatch) continue;
+
+      const url = urlMatch[1];
+      if (seen.has(url)) continue;
+      seen.add(url);
+
+      // Extract rating
+      const ratingMatch = item.match(/<span class="rating_num"[^>]*>([^<]+)<\/span>/);
+      const rating = ratingMatch ? cleanText(ratingMatch[1]) : '-';
+
+      // Extract info line (director, year)
+      const infoMatch = item.match(/<div class="bd">[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/);
+      const infoLine = infoMatch ? cleanText(infoMatch[1].replace(/<br\s*\/?>/g, ' ')) : '';
+      const dirMatch = infoLine.match(/导演:\s*([^主&]+)/);
+      const yearMatch = infoLine.match(/(\d{4})/);
+
+      // Extract quote
+      const quoteMatch = item.match(/<p class="quote">[\s\S]*?<span[^>]*>([^<]*)<\/span>/);
 
       results.push({
-        title: match[2],
-        rating: match[3],
-        url: itemUrl
+        rank,
+        title: cleanText(titleMatch[1]),
+        year: yearMatch ? yearMatch[1] : '-',
+        rating,
+        director: dirMatch ? cleanText(dirMatch[1]) : '-',
+        quote: quoteMatch ? cleanText(quoteMatch[1]) : '',
+        url
       });
     }
 
-    itemRegex.lastIndex = 0;
-    if (addedThisPage === 0) break;
     pageStart += 25;
   }
 
@@ -276,17 +487,55 @@ export async function getTop250(start = 0, limit = 25): Promise<{ title: string;
 /**
  * Get now playing movies
  */
-export async function getNowPlaying(city = 'beijing'): Promise<{ title: string; score: string; id: string }[]> {
-  const html = await fetchHtml(`${BASE}/cinema/nowplaying/${city}/`);
-  const results: { title: string; score: string; id: string }[] = [];
+export interface NowPlayingItem {
+  id: string;
+  title: string;
+  score: string;
+  director: string;
+  actors: string[];
+  duration: string;
+  region: string;
+  release_date: string;
+  vote_count: number;
+  wish_count: number;
+}
 
-  const regex = /data-title="([^"]+)"[^>]*data-score="([^"]*)"[^>]*data-subject="(\d+)"/g;
+export async function getNowPlaying(city = 'beijing'): Promise<NowPlayingItem[]> {
+  const html = await fetchHtml(`${BASE}/cinema/nowplaying/${city}/`);
+  const results: NowPlayingItem[] = [];
+
+  // Match the whole <li> tag to extract all data-* attributes
+  const itemRegex = /<li[^>]*class="list-item"[^>]*data-[^>]+>/g;
+  const readAttr = (tag: string, key: string): string => {
+    const m = tag.match(new RegExp(`data-${key}="([^"]*)"`));
+    return m ? cleanText(m[1]) : '';
+  };
+
   let match;
-  while ((match = regex.exec(html)) !== null) {
+  while ((match = itemRegex.exec(html)) !== null) {
+    const tag = match[0];
+    const id = readAttr(tag, 'subject');
+    const title = normalizeTitle(readAttr(tag, 'title'));
+    if (!id || !title) continue;
+
+    const actors = readAttr(tag, 'actors')
+      .split(/[，,]/)
+      .map((s) => cleanText(s))
+      .filter(Boolean);
+    const voteStr = readAttr(tag, 'votecount').replace(/\D/g, '');
+    const wishStr = readAttr(tag, 'wish').replace(/\D/g, '');
+
     results.push({
-      title: match[1],
-      score: match[2] || '-',
-      id: match[3]
+      id,
+      title,
+      score: readAttr(tag, 'score') || '-',
+      director: readAttr(tag, 'director') || '-',
+      actors,
+      duration: readAttr(tag, 'duration') || '-',
+      region: readAttr(tag, 'region') || '-',
+      release_date: readAttr(tag, 'release') || '-',
+      vote_count: voteStr ? Number(voteStr) : 0,
+      wish_count: wishStr ? Number(wishStr) : 0
     });
   }
   return results;
@@ -355,13 +604,14 @@ export async function getWeekly(limit = 10): Promise<WeeklyItem[]> {
 /**
  * Get movie reviews (long-form) from mobile API.
  */
-export async function getReviews(movieId: string, start = 0, limit = 20): Promise<ReviewItem[]> {
+export async function getReviews(movieId: string, start = 0, limit = 20): Promise<PaginatedResult<ReviewItem>> {
   const id = movieId.trim();
   if (!/^\d+$/.test(id)) throw new Error('电影 ID 必须是纯数字');
   if (!Number.isFinite(start) || start < 0) throw new Error('start 必须是非负整数');
-  if (!Number.isFinite(limit) || limit <= 0) return [];
+  if (!Number.isFinite(limit) || limit <= 0) return { items: [], total: 0 };
 
   interface ReviewResponse {
+    total?: number;
     reviews?: Array<{
       id?: string;
       title?: string;
@@ -379,17 +629,23 @@ export async function getReviews(movieId: string, start = 0, limit = 20): Promis
     Referer: `https://m.douban.com/movie/subject/${id}/`
   });
 
-  if (!Array.isArray(data.reviews)) return [];
+  const items = Array.isArray(data.reviews)
+    ? data.reviews.map((item) => ({
+      id: item.id || '',
+      user: item.user?.name || '匿名',
+      rating: item.rating?.value ? String(item.rating.value) : '-',
+      votes: item.useful_count || 0,
+      time: item.create_time || '',
+      content: `【${item.title || '无标题'}】${item.abstract || ''}`,
+      url: item.url || `https://movie.douban.com/review/${item.id}/`
+    }))
+    : [];
 
-  return data.reviews.map((item) => ({
-    id: item.id || '',
-    user: item.user?.name || '匿名',
-    rating: item.rating?.value ? String(item.rating.value) : '-',
-    votes: item.useful_count || 0,
-    time: item.create_time || '',
-    content: `【${item.title || '无标题'}】${item.abstract || ''}`,
-    url: item.url || `https://movie.douban.com/review/${item.id}/`
-  }));
+  const total = typeof data.total === 'number' && Number.isFinite(data.total) && data.total >= 0
+    ? data.total
+    : items.length;
+
+  return { items, total };
 }
 
 // City code mapping
@@ -403,11 +659,11 @@ export const CITIES: Record<string, string> = {
  * Get movie comments (short reviews) from mobile API.
  * order_by: 'hot' (default) or 'latest'
  */
-export async function getComments(movieId: string, orderBy: 'hot' | 'latest' = 'hot', start = 0, count = 20): Promise<CommentItem[]> {
+export async function getComments(movieId: string, orderBy: 'hot' | 'latest' = 'hot', start = 0, count = 20): Promise<PaginatedResult<CommentItem>> {
   const id = movieId.trim();
   if (!/^\d+$/.test(id)) throw new Error('电影 ID 必须是纯数字');
   if (!Number.isFinite(start) || start < 0) throw new Error('start 必须是非负整数');
-  if (!Number.isFinite(count) || count <= 0) return [];
+  if (!Number.isFinite(count) || count <= 0) return { items: [], total: 0 };
 
   interface Interest {
     id: string;
@@ -422,24 +678,30 @@ export async function getComments(movieId: string, orderBy: 'hot' | 'latest' = '
   }
 
   const url = `https://m.douban.com/rexxar/api/v2/movie/${id}/interests?count=${count}&start=${start}&order_by=${orderBy}`;
-  const data = await fetchJson<{ interests?: Interest[] }>(url, {
+  const data = await fetchJson<{ total?: number; interests?: Interest[] }>(url, {
     Referer: `https://m.douban.com/movie/subject/${id}/`
   });
 
-  if (!Array.isArray(data.interests)) return [];
+  const items = Array.isArray(data.interests)
+    ? data.interests
+      .filter((item) => item.comment)
+      .map((item) => ({
+        id: item.id || '',
+        user: item.user?.name || '匿名',
+        avatar: item.user?.avatar || '',
+        rating: item.rating?.value || 0,
+        votes: item.vote_count || 0,
+        time: item.create_time || '',
+        content: item.comment || '',
+        url: `https://www.douban.com/doubanapp/dispatch?uri=/movie/${id}/interest/${item.id}`
+      }))
+    : [];
 
-  return data.interests
-    .filter((item) => item.comment)
-    .map((item) => ({
-      id: item.id || '',
-      user: item.user?.name || '匿名',
-      avatar: item.user?.avatar || '',
-      rating: item.rating?.value || 0,
-      votes: item.vote_count || 0,
-      time: item.create_time || '',
-      content: item.comment || '',
-      url: `https://www.douban.com/doubanapp/dispatch?uri=/movie/${id}/interest/${item.id}`
-    }));
+  const total = typeof data.total === 'number' && Number.isFinite(data.total) && data.total >= 0
+    ? data.total
+    : items.length;
+
+  return { items, total };
 }
 
 export interface RatingStats {

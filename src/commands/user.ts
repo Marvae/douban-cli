@@ -45,7 +45,8 @@ export function registerUserCommands(program: Command): void {
     .description('获取指定用户的电影片单')
     .option('--wish', '查看"想看"列表（默认看过）')
     .option('--doing', '查看"在看"列表')
-    .option('-n, --limit <n>', '返回数量', '30')
+    .option('-p, --page <n>', '页码（从 1 开始）', '1')
+    .option('-n, --limit <n>', '每页数量', '15')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
       command: 'user',
@@ -67,22 +68,64 @@ export function registerUserCommands(program: Command): void {
       }
       const status = opts.wish ? 'wish' : opts.doing ? 'do' : 'collect';
       const statusLabel = opts.wish ? '想看' : opts.doing ? '在看' : '看过';
-      const limit = parsePositiveInt(opts.limit, '--limit', 30);
-
-      const items = await withSpinner(
-        `正在获取用户 ${userId} 的${statusLabel}片单...`,
-        () => getUserCollection(userId, status, limit),
-        !opts.json
-      );
+      const limit = parsePositiveInt(opts.limit, '--limit', 15);
 
       if (opts.json) {
+        const items = await withSpinner(
+          `正在获取用户 ${userId} 的${statusLabel}片单...`,
+          () => getUserCollection(userId, status, limit),
+          false
+        );
         console.log(JSON.stringify(items, null, 2));
-      } else {
-        console.log(`\n👤 用户 ${userId} ${statusLabel}\n`);
-        items.forEach((item, i) => {
-          console.log(`${(i + 1).toString().padStart(2)}. ${item.title}`);
-        });
+        return;
       }
+
+      // 交互式翻页模式
+      const readline = await import('node:readline');
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const question = (q: string) => new Promise<string>((resolve) => rl.question(q, resolve));
+
+      let page = parsePositiveInt(opts.page, '--page', 1);
+      let running = true;
+      while (running) {
+        // 获取比需要的多一条，用于判断是否有下一页
+        const fetchLimit = (page - 1) * limit + limit + 1;
+        const allItems = await withSpinner(
+          `正在获取用户 ${userId} 的${statusLabel}片单...`,
+          () => getUserCollection(userId, status, fetchLimit),
+          true
+        );
+
+        const start = (page - 1) * limit;
+        const items = allItems.slice(start, start + limit);
+        const hasMore = allItems.length > start + limit;
+
+        console.log(`\n👤 用户 ${userId} ${statusLabel}（第 ${page} 页）\n`);
+
+        if (items.length === 0) {
+          console.log('暂无更多记录');
+          break;
+        }
+
+        items.forEach((item, i) => {
+          const rating = item.rating > 0 ? `⭐${item.rating}` : '⭐-';
+          const date = item.date || '-';
+          console.log(`${(start + i + 1).toString().padStart(2)}. ${item.title} ${rating} ${date}`);
+        });
+
+        if (!hasMore) {
+          console.log('\n已到最后一页');
+          break;
+        }
+
+        const answer = await question('\n按回车加载下一页，输入 q 退出: ');
+        if (answer.toLowerCase() === 'q') {
+          running = false;
+        } else {
+          page++;
+        }
+      }
+      rl.close();
     }));
 
   program
@@ -176,7 +219,9 @@ export function registerUserCommands(program: Command): void {
       } else {
         console.log(`\n🙋 我的片单 (${userId}) ${statusLabel}\n`);
         items.forEach((item, i) => {
-          console.log(`${(i + 1).toString().padStart(2)}. ${item.title}`);
+          const rating = item.rating > 0 ? `⭐${item.rating}` : '⭐-';
+          const date = item.date || '-';
+          console.log(`${(i + 1).toString().padStart(2)}. ${item.title} ${rating} ${date}`);
         });
       }
     }));

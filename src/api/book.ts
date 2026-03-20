@@ -4,6 +4,7 @@ import {
   extractField,
   extractWindowJsonObject,
   fetchHtml,
+  fetchJson,
   isChallengePage,
   normalizeTitle
 } from './common.js';
@@ -32,13 +33,59 @@ export interface BookDetail {
   title: string;
   rating: string;
   author: string;
+  translator: string[];
   publisher: string;
   pubdate: string;
+  subtitle: string;
   pages: string;
   price: string;
   isbn: string;
+  comment_count: number;
+  review_count: number;
+  tags: string[];
   summary: string;
   url: string;
+}
+
+function sanitizeList(values: unknown[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  values.forEach((value) => {
+    const text = cleanText(String(value || ''));
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    result.push(text);
+  });
+
+  return result;
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (Array.isArray(value)) return sanitizeList(value);
+  if (typeof value === 'string') {
+    return sanitizeList(value.split('/').map((item) => item.trim()));
+  }
+  return [];
+}
+
+function normalizeCount(value: unknown): number {
+  const count = Number(value);
+  if (!Number.isFinite(count) || count < 0) return 0;
+  return Math.trunc(count);
+}
+
+function normalizeTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  return sanitizeList(value.map((item) => {
+    if (typeof item === 'string') return item;
+    if (item && typeof item === 'object') {
+      const record = item as Record<string, unknown>;
+      return String(record.name || record.title || record.tag || '');
+    }
+    return '';
+  }));
 }
 
 function parseBookSearchFromHtml(html: string, limit: number): BookSearchItem[] {
@@ -148,37 +195,101 @@ export async function getBookInfo(id: string): Promise<BookDetail> {
   if (!/^\d+$/.test(bookId)) throw new Error('书籍 ID 必须是纯数字');
 
   const url = `${BOOK_BASE}/subject/${bookId}/`;
-  const html = await fetchHtml(url, { Referer: BOOK_BASE });
-  if (isChallengePage(html)) throw new Error('书籍详情页面触发了反爬挑战，暂时无法解析');
+  const mobile = await fetchJson<{
+    title?: string;
+    rating?: { value?: number };
+    author?: string[] | string;
+    translator?: string[] | string;
+    publisher?: string;
+    pubdate?: string;
+    subtitle?: string;
+    pages?: string | number;
+    price?: string;
+    isbn13?: string;
+    isbn10?: string;
+    comment_count?: number;
+    review_count?: number;
+    tags?: Array<string | { name?: string; title?: string; tag?: string }>;
+    intro?: string;
+    summary?: string;
+    url?: string;
+  }>(`https://m.douban.com/rexxar/api/v2/book/${bookId}`, {
+    Referer: 'https://m.douban.com/'
+  });
 
-  const titleMatch = html.match(/<span\s+property="v:itemreviewed"[^>]*>([\s\S]*?)<\/span>/);
-  if (!titleMatch) throw new Error(`解析书籍详情失败，ID=${bookId}`);
+  let htmlInfo = {
+    title: '',
+    rating: '',
+    author: '',
+    publisher: '',
+    pubdate: '',
+    pages: '',
+    price: '',
+    isbn: '',
+    summary: ''
+  };
 
-  const ratingMatch = html.match(/<strong[^>]*property="v:average"[^>]*>([\s\S]*?)<\/strong>/)
-    || html.match(/<strong[^>]*class="[^"]*rating_num[^"]*"[^>]*>([\s\S]*?)<\/strong>/);
+  try {
+    const html = await fetchHtml(url, { Referer: BOOK_BASE });
+    if (!isChallengePage(html)) {
+      const titleMatch = html.match(/<span\s+property="v:itemreviewed"[^>]*>([\s\S]*?)<\/span>/);
+      const ratingMatch = html.match(/<strong[^>]*property="v:average"[^>]*>([\s\S]*?)<\/strong>/)
+        || html.match(/<strong[^>]*class="[^"]*rating_num[^"]*"[^>]*>([\s\S]*?)<\/strong>/);
 
-  const infoMatch = html.match(/<div id="info"[^>]*>([\s\S]*?)<\/div>/);
-  const infoHtml = infoMatch ? infoMatch[1] : '';
+      const infoMatch = html.match(/<div id="info"[^>]*>([\s\S]*?)<\/div>/);
+      const infoHtml = infoMatch ? infoMatch[1] : '';
 
-  const hiddenSummaryMatch = html.match(/<div class="indent" id="link-report">[\s\S]*?<span class="all hidden">([\s\S]*?)<\/span>/);
-  const normalSummaryMatch = html.match(/<div class="indent" id="link-report">[\s\S]*?<div class="intro">([\s\S]*?)<\/div>/);
-  const summary = hiddenSummaryMatch
-    ? cleanText(hiddenSummaryMatch[1])
-    : normalSummaryMatch
-      ? cleanText(normalSummaryMatch[1])
-      : '';
+      const hiddenSummaryMatch = html.match(/<div class="indent" id="link-report">[\s\S]*?<span class="all hidden">([\s\S]*?)<\/span>/);
+      const normalSummaryMatch = html.match(/<div class="indent" id="link-report">[\s\S]*?<div class="intro">([\s\S]*?)<\/div>/);
+      const summary = hiddenSummaryMatch
+        ? cleanText(hiddenSummaryMatch[1])
+        : normalSummaryMatch
+          ? cleanText(normalSummaryMatch[1])
+          : '';
+
+      htmlInfo = {
+        title: titleMatch ? normalizeTitle(titleMatch[1]) : '',
+        rating: ratingMatch ? cleanText(ratingMatch[1]) : '',
+        author: extractField(infoHtml, '作者'),
+        publisher: extractField(infoHtml, '出版社'),
+        pubdate: extractField(infoHtml, '出版年'),
+        pages: extractField(infoHtml, '页数'),
+        price: extractField(infoHtml, '定价'),
+        isbn: extractField(infoHtml, 'ISBN'),
+        summary
+      };
+    }
+  } catch {
+    // 移动端 API 为主数据源；PC 页面解析失败时保持静默降级
+  }
+
+  const title = normalizeTitle(mobile.title || htmlInfo.title);
+  if (!title) throw new Error(`解析书籍详情失败，ID=${bookId}`);
+
+  const mobileAuthor = normalizeStringList(mobile.author);
+  const mobileTranslator = normalizeStringList(mobile.translator);
+  const mobileSummary = cleanText(String(mobile.intro || mobile.summary || ''));
+  const subtitle = cleanText(String(mobile.subtitle || ''));
+  const rating = typeof mobile.rating?.value === 'number' ? mobile.rating.value.toFixed(1) : htmlInfo.rating;
+  const pages = cleanText(String(mobile.pages || ''));
+  const isbn = cleanText(String(mobile.isbn13 || mobile.isbn10 || ''));
 
   return {
     id: bookId,
-    title: normalizeTitle(titleMatch[1]),
-    rating: ratingMatch ? cleanText(ratingMatch[1]) : '-',
-    author: extractField(infoHtml, '作者') || '-',
-    publisher: extractField(infoHtml, '出版社') || '-',
-    pubdate: extractField(infoHtml, '出版年') || '-',
-    pages: extractField(infoHtml, '页数') || '-',
-    price: extractField(infoHtml, '定价') || '-',
-    isbn: extractField(infoHtml, 'ISBN') || '-',
-    summary: summary || '-',
-    url
+    title,
+    rating: rating || '-',
+    author: mobileAuthor.length > 0 ? mobileAuthor.join(' / ') : htmlInfo.author || '-',
+    translator: mobileTranslator,
+    publisher: cleanText(String(mobile.publisher || '')) || htmlInfo.publisher || '-',
+    pubdate: cleanText(String(mobile.pubdate || '')) || htmlInfo.pubdate || '-',
+    subtitle: subtitle || '-',
+    pages: pages || htmlInfo.pages || '-',
+    price: cleanText(String(mobile.price || '')) || htmlInfo.price || '-',
+    isbn: isbn || htmlInfo.isbn || '-',
+    comment_count: normalizeCount(mobile.comment_count),
+    review_count: normalizeCount(mobile.review_count),
+    tags: normalizeTags(mobile.tags),
+    summary: mobileSummary || htmlInfo.summary || '-',
+    url: cleanText(String(mobile.url || '')) || url
   };
 }
