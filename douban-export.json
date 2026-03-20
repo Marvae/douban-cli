@@ -1,0 +1,69 @@
+{
+  "user": {
+    "id": "187648513",
+    "name": "Marvae",
+    "url": "https://www.douban.com/people/187648513/"
+  },
+  "records": [
+    {
+      "id": "36352371",
+      "title": "同乐者 第一季 / Pluribus Season 1",
+      "url": "https://movie.douban.com/subject/36352371/",
+      "status": "collect",
+      "date": "2026-03-18",
+      "rating": 5
+    },
+    {
+      "id": "36778966",
+      "title": "都是她的错 / All Her Fault",
+      "url": "https://movie.douban.com/subject/36778966/",
+      "status": "collect",
+      "date": "2026-03-18",
+      "rating": 4
+    },
+    {
+      "id": "26816519",
+      "title": "逃避虽可耻但有用 / 逃げるは恥だが役に立つ",
+      "url": "https://movie.douban.com/subject/26816519/",
+      "status": "collect",
+      "date": "2026-03-18",
+      "rating": 5
+    },
+    {
+      "id": "1291546",
+      "title": "霸王别姬",
+      "url": "https://movie.douban.com/subject/1291546/",
+      "status": "wish",
+      "date": "2026-03-20"
+    },
+    {
+      "id": "35010610",
+      "title": "挽救计划 / Project Hail Mary",
+      "url": "https://movie.douban.com/subject/35010610/",
+      "status": "wish",
+      "date": "2025-09-20"
+    },
+    {
+      "id": "35861791",
+      "title": "初步举证 / National Theatre Live: Prima Facie",
+      "url": "https://movie.douban.com/subject/35861791/",
+      "status": "wish",
+      "date": "2025-03-24"
+    },
+    {
+      "id": "30305530",
+      "title": "真相捕捉 第一季 / The Capture Season 1",
+      "url": "https://movie.douban.com/subject/30305530/",
+      "status": "do",
+      "date": "2026-03-18"
+    },
+    {
+      "id": "36743840",
+      "title": "闪闪的儿科医生 第二季",
+      "url": "https://movie.douban.com/subject/36743840/",
+      "status": "do",
+      "date": "2024-09-30",
+      "rating": 5
+    }
+  ]
+}
