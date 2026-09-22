@@ -1087,6 +1087,22 @@ export async function detectAuthSession(): Promise<AuthSession | null> {
   return readAuthCache();
 }
 
+/**
+ * Cookie header of the local login session, or `undefined` when no session is cached.
+ *
+ * Never throws. Collection pages used to be readable anonymously, but Douban now redirects
+ * those requests to `sec.douban.com` (HTTP 403), so readers should reuse the local session
+ * when one exists — while still degrading to an anonymous read (and its own error) when none does.
+ */
+export async function getOptionalSessionCookies(): Promise<string | undefined> {
+  try {
+    const session = readAuthCache();
+    return session?.cookies.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function ensureAuth(): Promise<VerifiedAuthSession> {
   const cached = readAuthCache();
   if (!cached) {

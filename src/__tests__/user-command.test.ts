@@ -9,7 +9,8 @@ const apiMocks = vi.hoisted(() => ({
   getUserCollectionPage: vi.fn()
 }));
 const authMocks = vi.hoisted(() => ({
-  ensureAuth: vi.fn()
+  ensureAuth: vi.fn(),
+  getOptionalSessionCookies: vi.fn()
 }));
 
 vi.mock('../api/collection.js', () => ({
@@ -60,6 +61,7 @@ describe('user command', () => {
       partial: false,
       warnings: []
     });
+    authMocks.getOptionalSessionCookies.mockResolvedValue('dbcl2=alice; ck=token');
     const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
     await createProgram().parseAsync([
@@ -74,13 +76,16 @@ describe('user command', () => {
       '--json'
     ]);
 
-    expect(apiMocks.getUserCollectionPage).toHaveBeenCalledWith({
-      kind: 'movie',
-      userId: 'alice',
-      status: 'collect',
-      start: 20,
-      count: 10
-    });
+    expect(apiMocks.getUserCollectionPage).toHaveBeenCalledWith(
+      {
+        kind: 'movie',
+        userId: 'alice',
+        status: 'collect',
+        start: 20,
+        count: 10
+      },
+      'dbcl2=alice; ck=token'
+    );
     expect(JSON.parse(String(stdout.mock.calls[0]?.[0]))).toEqual([
       { kind: 'movie', id: '42', title: 'Example' }
     ]);
@@ -94,6 +99,7 @@ describe('user command', () => {
       partial: false,
       warnings: []
     });
+    authMocks.getOptionalSessionCookies.mockResolvedValue('dbcl2=alice; ck=token');
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
     await createProgram().parseAsync([
@@ -108,13 +114,16 @@ describe('user command', () => {
     ]);
 
     expect(apiMocks.getUserCollectionPage).toHaveBeenCalledOnce();
-    expect(apiMocks.getUserCollectionPage).toHaveBeenCalledWith({
-      kind: 'movie',
-      userId: 'alice',
-      status: 'collect',
-      start: 20,
-      count: 10
-    });
+    expect(apiMocks.getUserCollectionPage).toHaveBeenCalledWith(
+      {
+        kind: 'movie',
+        userId: 'alice',
+        status: 'collect',
+        start: 20,
+        count: 10
+      },
+      'dbcl2=alice; ck=token'
+    );
   });
 
   it('rejects conflicting collection status flags before fetching', async () => {
