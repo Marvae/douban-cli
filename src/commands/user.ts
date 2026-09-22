@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { chmodSync, lstatSync, readFileSync, unlinkSync } from 'node:fs';
 import { Command } from 'commander';
-import { ensureAuth } from '../auth.js';
+import { ensureAuth, getOptionalSessionCookies } from '../auth.js';
 import { getUserCollectionPage } from '../api/collection.js';
 import { getUserCollection } from '../api/user.js';
 import { withErrorHandler } from '../utils/error.js';
@@ -118,17 +118,22 @@ export function registerUserCommands(program: Command): void {
       const limit = parsePositiveInt(opts.limit, '--limit', 15);
       const page = parsePositiveInt(opts.page, '--page', 1);
       const startForPage = pageToOffset(page, limit);
+      // Douban requires a login session for collection pages; reuse the local one when present.
+      const cookies = await getOptionalSessionCookies();
 
       if (opts.json) {
         const result = await withSpinner(
           `正在获取用户 ${userId} 的${statusLabel}片单...`,
-          () => getUserCollectionPage({
-            kind: 'movie',
-            userId,
-            status,
-            start: startForPage,
-            count: limit
-          }),
+          () => getUserCollectionPage(
+            {
+              kind: 'movie',
+              userId,
+              status,
+              start: startForPage,
+              count: limit
+            },
+            cookies
+          ),
           false
         );
         result.warnings.forEach((warning) => console.error(`⚠️ ${warning}`));
@@ -145,13 +150,16 @@ export function registerUserCommands(program: Command): void {
           const start = pageToOffset(currentPage, limit);
           const result = await withSpinner(
             `正在获取用户 ${userId} 的${statusLabel}片单...`,
-            () => getUserCollectionPage({
-              kind: 'movie',
-              userId,
-              status,
-              start,
-              count: limit
-            }),
+            () => getUserCollectionPage(
+              {
+                kind: 'movie',
+                userId,
+                status,
+                start,
+                count: limit
+              },
+              cookies
+            ),
             true
           );
           warningsByPage.set(currentPage, result.warnings);

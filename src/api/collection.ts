@@ -384,8 +384,11 @@ async function loadUserCollectionPage(
   };
 }
 
-export function getUserCollectionPage(options: UserCollectionPageOptions): Promise<UserCollectionPage> {
-  return loadUserCollectionPage(options);
+export function getUserCollectionPage(
+  options: UserCollectionPageOptions,
+  cookies?: string
+): Promise<UserCollectionPage> {
+  return loadUserCollectionPage(options, cookies?.trim() || undefined);
 }
 
 export function loadAuthenticatedUserCollectionPage(
