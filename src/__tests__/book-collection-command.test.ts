@@ -28,6 +28,10 @@ const mocks = vi.hoisted(() => ({
   })
 }));
 
+const authMocks = vi.hoisted(() => ({
+  getOptionalSessionCookies: vi.fn()
+}));
+
 vi.mock('../api/collection.js', () => ({
   getUserCollectionPage: mocks.getUserCollectionPage
 }));
@@ -46,6 +50,7 @@ vi.mock('../utils/timing.js', () => ({
   )),
   sleep: mocks.sleep
 }));
+vi.mock('../auth.js', () => authMocks);
 
 import { registerBookCollectionCommands } from '../commands/book-collection.ts';
 
@@ -94,19 +99,49 @@ describe('book collection commands', () => {
       partial: false,
       warnings: []
     });
+    authMocks.getOptionalSessionCookies.mockResolvedValue('dbcl2=alice; ck=token');
     const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
     await run(['book', 'user', 'alice', '--reading', '--page', '3', '--limit', '10']);
 
-    expect(mocks.getUserCollectionPage).toHaveBeenCalledWith({
-      kind: 'book',
-      userId: 'alice',
-      status: 'do',
-      start: 20,
-      count: 10
-    });
+    expect(mocks.getUserCollectionPage).toHaveBeenCalledWith(
+      {
+        kind: 'book',
+        userId: 'alice',
+        status: 'do',
+        start: 20,
+        count: 10
+      },
+      'dbcl2=alice; ck=token'
+    );
     expect(mocks.withPagination).toHaveBeenCalledOnce();
     expect(stdout.mock.calls.flat().join('\n')).toContain('ID: 42');
+  });
+
+  it('falls back to an anonymous read when no local session exists', async () => {
+    authMocks.getOptionalSessionCookies.mockResolvedValue(undefined);
+    mocks.getUserCollectionPage.mockResolvedValue({
+      items: [collectionItem('7')],
+      total: 1,
+      nextStart: null,
+      partial: false,
+      warnings: []
+    });
+    const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await run(['book', 'user', 'alice', '--limit', '10', '--json']);
+
+    expect(mocks.getUserCollectionPage).toHaveBeenCalledWith(
+      {
+        kind: 'book',
+        userId: 'alice',
+        status: 'collect',
+        start: 0,
+        count: 10
+      },
+      undefined
+    );
+    expect(stdout.mock.calls.flat().join('\n')).toContain('Book 7');
   });
 
   it('rejects conflicting book collection status flags before fetching', async () => {
@@ -121,6 +156,7 @@ describe('book collection commands', () => {
   });
 
   it('follows nextStart while exporting a shareable Markdown list', async () => {
+    authMocks.getOptionalSessionCookies.mockResolvedValue('dbcl2=alice; ck=token');
     mocks.getUserCollectionPage
       .mockResolvedValueOnce({
         items: [
@@ -154,22 +190,30 @@ describe('book collection commands', () => {
       '2'
     ]);
 
-    expect(mocks.getUserCollectionPage).toHaveBeenNthCalledWith(1, {
-      kind: 'book',
-      userId: 'alice',
-      status: 'wish',
-      start: 0,
-      count: 3,
-      pageDelayMs: 2000
-    });
-    expect(mocks.getUserCollectionPage).toHaveBeenNthCalledWith(2, {
-      kind: 'book',
-      userId: 'alice',
-      status: 'wish',
-      start: 2,
-      count: 1,
-      pageDelayMs: 2000
-    });
+    expect(mocks.getUserCollectionPage).toHaveBeenNthCalledWith(
+      1,
+      {
+        kind: 'book',
+        userId: 'alice',
+        status: 'wish',
+        start: 0,
+        count: 3,
+        pageDelayMs: 2000
+      },
+      'dbcl2=alice; ck=token'
+    );
+    expect(mocks.getUserCollectionPage).toHaveBeenNthCalledWith(
+      2,
+      {
+        kind: 'book',
+        userId: 'alice',
+        status: 'wish',
+        start: 2,
+        count: 1,
+        pageDelayMs: 2000
+      },
+      'dbcl2=alice; ck=token'
+    );
     expect(mocks.sleep).toHaveBeenCalledOnce();
     expect(mocks.sleep).toHaveBeenCalledWith(2000);
 

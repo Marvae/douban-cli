@@ -11,7 +11,7 @@ Unofficial Douban CLI for movies, TV shows, books, collections, and authenticate
 
 `douban-cli` 不只是一个搜索命令：它覆盖影视发现、Top250 与口碑榜、电影和图书详情、评分分布、短评/长评/读书笔记、公开片单与书单、交互翻页、JSON 输出、批量标记和数据导出。
 
-> 公开电影、图书、豆列和用户收藏查询无需登录。只有账号身份、电影标记/评分/评论、个人统计与私有导出需要显式运行 `douban login`。
+> 电影、图书、豆列等公开查询无需登录。**用户收藏（片单/书单）在豆瓣侧已改为要求登录**，CLI 会自动复用本地登录态；没有登录态时仍按匿名请求，并如实返回上游错误。只有账号身份、电影标记/评分/评论、个人统计与私有导出需要显式运行 `douban login`。
 >
 > 当前登录后的写操作仅支持电影；图书功能为公开查询、阅读内容和公开书单导出。
 
@@ -106,7 +106,7 @@ douban reviews 1291546 --limit 5
 
 ## 📚 图书
 
-图书命令都是公开只读请求，无需登录。详情、评分、短评、书评和笔记命令均可接受豆瓣条目 ID、ISBN 或关键词。
+图书命令都是只读请求。榜单、搜索、详情、评分、短评、书评和笔记无需登录（可接受豆瓣条目 ID、ISBN 或关键词）；`book user` / `book export` 读取书单时会自动复用本地登录态，因为豆瓣已不允许匿名读取收藏页。
 
 | 命令 | 能做什么 | 常用参数 |
 |---|---|---|
@@ -140,7 +140,7 @@ douban book comments 三体
 douban book reviews 三体 --limit 5
 douban book notes 三体 --limit 5
 
-# 公开书单
+# 书单（自动复用本地登录态）
 douban book user USER_ID --wish --page 2
 douban book user USER_ID --reading
 douban book export USER_ID --wish --limit 100 --delay 2 -o books.md
@@ -153,8 +153,8 @@ douban book export USER_ID --reading -f csv -o reading.csv
 
 | 命令 | 能做什么 | 登录要求 |
 |---|---|---|
-| `douban user <userId>` | 指定用户的电影看过/想看/在看 | 无需登录；默认看过，使用 `--wish` 或 `--doing` 切换 |
-| `douban book user <userId>` | 指定用户的图书读过/想读/在读 | 无需登录；默认读过，使用 `--wish` 或 `--reading` 切换 |
+| `douban user <userId>` | 指定用户的电影看过/想看/在看 | 自动复用本地登录态；默认看过，使用 `--wish` 或 `--doing` 切换 |
+| `douban book user <userId>` | 指定用户的图书读过/想读/在读 | 自动复用本地登录态；默认读过，使用 `--wish` 或 `--reading` 切换 |
 | `douban config` | 查看本地配置；`--user <id>` 设置 `me` 的默认用户 | 无需登录 |
 | `douban me` | 默认用户或当前登录账号的电影收藏 | 配置过用户 ID 时无需登录，否则使用缓存登录态 |
 | `douban list` | 热门豆列推荐 | 无需登录 |
