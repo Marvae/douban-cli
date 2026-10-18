@@ -45,7 +45,7 @@
   },
   "homepage": "https://github.com/Marvae/douban-cli",
   "dependencies": {
-    "@steipete/sweet-cookie": "0.4.1",
+    "@steipete/sweet-cookie": "0.4.4",
     "commander": "^15.0.0"
   },
   "devDependencies": {
