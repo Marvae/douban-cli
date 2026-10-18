@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getCollectionRecords, getCurrentUserProfile } from '../api/account.ts';
+import { getCollectionRecords, getCurrentUserProfile, getUserCollectionPageWithSession } from '../api/account.ts';
 import { getUserCollectionPage } from '../api/collection.ts';
 
 afterEach(() => {
@@ -27,6 +27,37 @@ function htmlResponseAt(html: string, url: string): Response {
 }
 
 describe('authenticated account reads', () => {
+  it.each(['book', 'movie'] as const)('includes signed-in-only %s entries when a session is supplied', async (kind) => {
+    const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
+      const signedIn = new Headers(init?.headers).get('Cookie') === 'dbcl2=secret';
+      const html = signedIn
+        ? collectionHtml().replaceAll('movie.douban.com', `${kind}.douban.com`)
+        : '<span class="subject-num">0-0 / 0</span>';
+      return new Response(html, { headers: { 'Content-Type': 'text/html' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const options = { kind, userId: 'alice', status: 'collect' as const, count: 15 };
+
+    const anonymous = await getUserCollectionPageWithSession(options);
+    expect(anonymous.items).toHaveLength(0);
+    expect(anonymous.total).toBe(0);
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).has('Cookie')).toBe(false);
+
+    const authenticated = await getUserCollectionPageWithSession(options, '  dbcl2=secret  ');
+    expect(authenticated.items.map((item) => item.id)).toEqual(['42']);
+    expect(authenticated.total).toBe(1);
+    expect(authenticated.partial).toBe(false);
+  });
+
+  it('uses anonymous access for a blank optional session', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(collectionHtml()));
+    vi.stubGlobal('fetch', fetchMock);
+    await getUserCollectionPageWithSession({
+      kind: 'movie', userId: 'alice', status: 'collect', count: 1
+    }, '   ');
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).has('Cookie')).toBe(false);
+  });
+
   it('loads the current profile from the authenticated mine page', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(
       '<a class="lnk-mine" href="https://www.douban.com/people/alice/">Alice</a>',

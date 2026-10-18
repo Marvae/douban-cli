@@ -7,6 +7,7 @@ describe('public API boundary', () => {
     expect(publicApi).not.toHaveProperty('fetchHtml');
     expect(publicApi).not.toHaveProperty('getCurrentUserProfile');
     expect(publicApi).not.toHaveProperty('getCollectionRecords');
+    expect(publicApi).not.toHaveProperty('getUserCollectionPageWithSession');
     expect(publicApi).not.toHaveProperty('loadAuthenticatedUserCollectionPage');
     expect(publicApi).not.toHaveProperty('resolveCk');
     expect(publicApi).not.toHaveProperty('updateSubjectInterest');

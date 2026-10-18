@@ -1,5 +1,4 @@
 import { debug } from '../utils/debug.js';
-import { getOptionalSessionCookies } from '../auth.js';
 import {
   getUserCollectionPage,
   type CollectionStatus,
@@ -17,16 +16,13 @@ export async function getUserCollection(
   limit = 50
 ): Promise<UserCollectionItem[]> {
   if (!Number.isInteger(limit) || limit <= 0) return [];
-  const page: UserCollectionPage = await getUserCollectionPage(
-    {
-      kind: 'movie',
-      userId,
-      status,
-      start: 0,
-      count: limit
-    } satisfies UserCollectionPageOptions,
-    await getOptionalSessionCookies()
-  );
+  const page: UserCollectionPage = await getUserCollectionPage({
+    kind: 'movie',
+    userId,
+    status,
+    start: 0,
+    count: limit
+  } satisfies UserCollectionPageOptions);
 
   if (page.partial) {
     debug('user', `用户片单仅返回部分结果: ${page.warnings.join('; ')}`);

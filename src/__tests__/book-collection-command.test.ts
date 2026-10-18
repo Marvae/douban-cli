@@ -32,8 +32,8 @@ const authMocks = vi.hoisted(() => ({
   getOptionalSessionCookies: vi.fn()
 }));
 
-vi.mock('../api/collection.js', () => ({
-  getUserCollectionPage: mocks.getUserCollectionPage
+vi.mock('../api/account.js', () => ({
+  getUserCollectionPageWithSession: mocks.getUserCollectionPage
 }));
 vi.mock('../storage/secure-file.js', () => ({
   secureAtomicWriteFile: mocks.secureAtomicWriteFile

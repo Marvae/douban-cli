@@ -1,12 +1,12 @@
 import path from 'node:path';
 import { Command } from 'commander';
-import {
-  getUserCollectionPage,
-  type CollectionStatus,
-  type UserCollectionItem,
-  type UserCollectionPage
+import type {
+  CollectionStatus,
+  UserCollectionItem,
+  UserCollectionPage
 } from '../api/collection.js';
 import { getOptionalSessionCookies } from '../auth.js';
+import { getUserCollectionPageWithSession } from '../api/account.js';
 import { secureAtomicWriteFile } from '../storage/secure-file.js';
 import { withErrorHandler } from '../utils/error.js';
 import { pageToOffset, parsePositiveInt } from '../utils/parsing.js';
@@ -199,7 +199,7 @@ async function fetchBookCollectionExport(
 
     let result: UserCollectionPage;
     try {
-      result = await getUserCollectionPage(
+      result = await getUserCollectionPageWithSession(
         {
           kind: 'book',
           userId,
@@ -277,13 +277,13 @@ export function registerBookCollectionCommands(book: Command): void {
       const page = parsePositiveInt(opts.page, '--page', 1);
       const limit = parsePositiveInt(opts.limit, '--limit', DEFAULT_PAGE_SIZE);
       const start = pageToOffset(page, limit);
-      // Douban requires a login session for collection pages; reuse the local one when present.
+      // Reuse the local session to include collections visible only when signed in.
       const cookies = await getOptionalSessionCookies();
 
       if (opts.json) {
         const result = await withSpinner(
           `正在获取用户 ${userId} 的${statusLabel}书单...`,
-          () => getUserCollectionPage({ kind: 'book', userId, status, start, count: limit }, cookies),
+          () => getUserCollectionPageWithSession({ kind: 'book', userId, status, start, count: limit }, cookies),
           false
         );
         emitWarnings(result);
@@ -298,7 +298,7 @@ export function registerBookCollectionCommands(book: Command): void {
           const currentStart = pageToOffset(currentPage, limit);
           const result = await withSpinner(
             `正在获取用户 ${userId} 的${statusLabel}书单...`,
-            () => getUserCollectionPage(
+            () => getUserCollectionPageWithSession(
               {
                 kind: 'book',
                 userId,
@@ -343,7 +343,7 @@ export function registerBookCollectionCommands(book: Command): void {
       const pageDelayMs = Math.round(delaySeconds * 1000);
       const outputPath = path.resolve(String(opts.output));
       const format = resolveExportFormat(opts.format, outputPath);
-      // Collection pages now require a login session on Douban's side; reuse the local one when present.
+      // Reuse the same session across all export pages.
       const cookies = await getOptionalSessionCookies();
       const result = await withSpinner(
         `正在导出用户 ${userId} 的${statusLabel}书单...`,

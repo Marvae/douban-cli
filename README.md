@@ -11,9 +11,9 @@ Unofficial Douban CLI for movies, TV shows, books, collections, and authenticate
 
 `douban-cli` 不只是一个搜索命令：它覆盖影视发现、Top250 与口碑榜、电影和图书详情、评分分布、短评/长评/读书笔记、公开片单与书单、交互翻页、JSON 输出、批量标记和数据导出。
 
-> 电影、图书、豆列等公开查询无需登录。**用户收藏（片单/书单）在豆瓣侧已改为要求登录**，CLI 会自动复用本地登录态；没有登录态时仍按匿名请求，并如实返回上游错误。只有账号身份、电影标记/评分/评论、个人统计与私有导出需要显式运行 `douban login`。
+> 电影、图书、豆列等公开查询无需登录。**用户收藏（片单/书单）的匿名结果可能不完整，部分请求也可能被豆瓣拒绝**，CLI 会自动复用已有的本地登录态；没有登录态时仍按匿名请求。可先运行 `douban login`，以当前账号的可见范围查询收藏。账号身份、电影标记/评分/评论、个人统计与私有导出需要登录。
 >
-> 当前登录后的写操作仅支持电影；图书功能为公开查询、阅读内容和公开书单导出。
+> 当前登录后的写操作仅支持电影；图书功能均为只读查询与导出。
 
 **导航：** [快速开始](#-快速开始) · [电影与剧集](#-电影与剧集) · [图书](#-图书) · [用户收藏](#-用户收藏豆列与配置) · [账号操作](#-登录个人数据与账号操作) · [批量操作](#-批量操作) · [JSON](#-json-输出与脚本化)
 
@@ -106,7 +106,7 @@ douban reviews 1291546 --limit 5
 
 ## 📚 图书
 
-图书命令都是只读请求。榜单、搜索、详情、评分、短评、书评和笔记无需登录（可接受豆瓣条目 ID、ISBN 或关键词）；`book user` / `book export` 读取书单时会自动复用本地登录态，因为豆瓣已不允许匿名读取收藏页。
+图书命令都是只读请求。榜单、搜索、详情、评分、短评、书评和笔记无需登录（可接受豆瓣条目 ID、ISBN 或关键词）；`book user` / `book export` 读取书单时会自动复用本地登录态，以获取当前账号可见的收藏；没有登录态时使用匿名请求，结果可能较少或被拒绝。
 
 | 命令 | 能做什么 | 常用参数 |
 |---|---|---|
@@ -120,8 +120,8 @@ douban reviews 1291546 --limit 5
 | `douban book comments <query>` | 热门短评 | `--page`、`--limit` |
 | `douban book reviews <query>` | 热门书评 | `--page`、`--limit` |
 | `douban book notes <query>` | 热门读书笔记 | `--page`、`--limit` |
-| `douban book user <userId>` | 公开的想读/在读/读过书单 | `--wish`、`--reading`、`--page`、`--limit` |
-| `douban book export <userId>` | 将公开书单导出到文件 | `--wish`、`--reading`、`--limit`、`--output`、`--format`、`--delay` |
+| `douban book user <userId>` | 指定用户当前可见的想读/在读/读过书单 | `--wish`、`--reading`、`--page`、`--limit` |
+| `douban book export <userId>` | 将当前可见的书单导出到文件 | `--wish`、`--reading`、`--limit`、`--output`、`--format`、`--delay` |
 
 `book chart` 和 `book new` 支持：全部、文学、小说、历史文化、社会纪实、科学新知、艺术设计、商业经管、绘本漫画。
 
@@ -154,9 +154,9 @@ douban book export USER_ID --reading -f csv -o reading.csv
 | 命令 | 能做什么 | 登录要求 |
 |---|---|---|
 | `douban user <userId>` | 指定用户的电影看过/想看/在看 | 自动复用本地登录态；默认看过，使用 `--wish` 或 `--doing` 切换 |
-| `douban book user <userId>` | 指定用户的图书读过/想读/在读 | 自动复用本地登录态；默认读过，使用 `--wish` 或 `--reading` 切换 |
+| `douban book user <userId>` | 指定用户当前可见的图书读过/想读/在读 | 自动复用本地登录态；默认读过，使用 `--wish` 或 `--reading` 切换 |
 | `douban config` | 查看本地配置；`--user <id>` 设置 `me` 的默认用户 | 无需登录 |
-| `douban me` | 默认用户或当前登录账号的电影收藏 | 配置过用户 ID 时无需登录，否则使用缓存登录态 |
+| `douban me` | 默认用户或当前登录账号的电影收藏 | 有默认用户时自动复用本地登录态、无登录态则匿名读取；否则先验证登录账号 |
 | `douban list` | 热门豆列推荐 | 无需登录 |
 
 ```bash
@@ -243,8 +243,10 @@ douban logout
 
 | 命令 | 数据 | 登录 | 格式 | 说明 |
 |---|---|---|---|---|
-| `douban book export <userId>` | 指定用户的公开想读/在读/读过 | 不需要 | Markdown、CSV、JSON | 必须指定 `--output`；未传 `--format` 时按扩展名推断；最多 5000 条；`--delay` 控制分页间隔 |
+| `douban book export <userId>` | 指定用户在当前登录状态下可见的想读/在读/读过 | 自动复用；无登录态则匿名读取 | Markdown、CSV、JSON | 必须指定 `--output`；未传 `--format` 时按扩展名推断；最多 5000 条；`--delay` 控制分页间隔 |
 | `douban export` | 当前账号的电影看过/想看/在看 | 需要 | CSV、JSON | 必须指定 `--output`；可能包含评分、短评和用户信息；`--delay` 控制分页和状态切换间隔 |
+
+登录后导出自己的书单可能包含匿名访问时不可见的条目，分享文件前请检查内容。
 
 两种导出在后续页面请求失败时都会保留已经取得的数据，并通过 stderr 明确告警。JSON 文件还会写入 `metadata.partial` 和 `metadata.warnings`；CSV/Markdown 会在完成提示中标明结果可能不完整。
 

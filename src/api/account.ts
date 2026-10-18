@@ -1,9 +1,23 @@
 import { debug } from '../utils/debug.js';
 import { cleanText, fetchHtml, fetchHtmlPage } from './common.js';
 import {
+  getUserCollectionPage,
   loadAuthenticatedUserCollectionPage,
-  type CollectionStatus
+  type CollectionStatus,
+  type UserCollectionPage,
+  type UserCollectionPageOptions
 } from './collection.js';
+
+/** Read with an explicitly supplied session, retaining anonymous access when absent. */
+export function getUserCollectionPageWithSession(
+  options: UserCollectionPageOptions,
+  cookies?: string
+): Promise<UserCollectionPage> {
+  const cookieHeader = cookies?.trim();
+  return cookieHeader
+    ? loadAuthenticatedUserCollectionPage(options, cookieHeader)
+    : getUserCollectionPage(options);
+}
 
 interface ProfileMatch {
   id: string;
