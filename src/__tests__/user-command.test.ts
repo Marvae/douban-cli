@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 
 const apiMocks = vi.hoisted(() => ({
-  getUserCollection: vi.fn(),
   getUserCollectionPage: vi.fn()
 }));
 const authMocks = vi.hoisted(() => ({
@@ -13,11 +12,8 @@ const authMocks = vi.hoisted(() => ({
   getOptionalSessionCookies: vi.fn()
 }));
 
-vi.mock('../api/collection.js', () => ({
-  getUserCollectionPage: apiMocks.getUserCollectionPage
-}));
-vi.mock('../api/user.js', () => ({
-  getUserCollection: apiMocks.getUserCollection
+vi.mock('../api/account.js', () => ({
+  getUserCollectionPageWithSession: apiMocks.getUserCollectionPage
 }));
 vi.mock('../auth.js', () => authMocks);
 vi.mock('../utils/spinner.js', () => ({
@@ -151,13 +147,38 @@ describe('user command', () => {
       accountName: 'Alice',
       updatedAt: '2026-08-10T00:00:00.000Z'
     });
-    apiMocks.getUserCollection.mockResolvedValue([]);
+    apiMocks.getUserCollectionPage.mockResolvedValue({
+      items: [], total: 0, nextStart: null, partial: false, warnings: []
+    });
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
     await createProgram().parseAsync(['node', 'douban', 'me', '--json']);
 
     expect(authMocks.ensureAuth).toHaveBeenCalledOnce();
-    expect(apiMocks.getUserCollection).toHaveBeenCalledWith('alice', 'collect', 30);
+    expect(apiMocks.getUserCollectionPage).toHaveBeenCalledWith({
+      kind: 'movie', userId: 'alice', status: 'collect', start: 0, count: 30
+    }, 'dbcl2=secret');
+    expect(authMocks.getOptionalSessionCookies).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, 'dbcl2=cached-account'])('reads the configured user with the optional session %s', async (cookies) => {
+    const tempHome = mkdtempSync(path.join(os.tmpdir(), 'douban-config-'));
+    tempDirectories.push(tempHome);
+    process.env.HOME = tempHome;
+    process.env.DOUBAN_CLI_HOME = path.join(tempHome, 'storage');
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    await createProgram().parseAsync(['node', 'douban', 'config', '--user', 'alice', '--json']);
+    authMocks.getOptionalSessionCookies.mockResolvedValue(cookies);
+    apiMocks.getUserCollectionPage.mockResolvedValue({
+      items: [], total: 0, nextStart: null, partial: false, warnings: []
+    });
+
+    await createProgram().parseAsync(['node', 'douban', 'me', '--json']);
+
+    expect(authMocks.ensureAuth).not.toHaveBeenCalled();
+    expect(apiMocks.getUserCollectionPage).toHaveBeenCalledWith({
+      kind: 'movie', userId: 'alice', status: 'collect', start: 0, count: 30
+    }, cookies);
   });
 
   it('stores config in a private DOUBAN_CLI_HOME directory', async () => {

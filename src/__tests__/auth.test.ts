@@ -84,6 +84,57 @@ function netscapeCookieLine(name: string, value: string, options: {
 }
 
 describe.sequential('authentication safety', () => {
+  it('optional session lookup stays offline when no cache exists', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const auth = await import('../auth.ts');
+    await expect(auth.getOptionalSessionCookies()).resolves.toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('optional session lookup reuses a valid cache without verifying it again', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice')));
+    vi.stubGlobal('fetch', fetchMock);
+    const auth = await import('../auth.ts');
+    await auth.loginFromCookieStdin(cookieStdin('dbcl2=mock-account; ck=mock-csrf'));
+    fetchMock.mockClear();
+
+    await expect(auth.getOptionalSessionCookies()).resolves.toBe('dbcl2=mock-account; ck=mock-csrf');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('optional session lookup ignores malformed caches and invalid storage settings', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mkdirSync(path.dirname(authCachePath()), { recursive: true });
+    writeFileSync(authCachePath(), '{broken-cache', { mode: 0o600 });
+    const auth = await import('../auth.ts');
+
+    await expect(auth.getOptionalSessionCookies()).resolves.toBeUndefined();
+    process.env.DOUBAN_CLI_HOME = 'invalid-relative-path';
+    await expect(auth.getOptionalSessionCookies()).resolves.toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('optional session lookup ignores unreadable cache paths', async () => {
+    mkdirSync(authCachePath(), { recursive: true });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const auth = await import('../auth.ts');
+    await expect(auth.getOptionalSessionCookies()).resolves.toBeUndefined();
+    expect(lstatSync(authCachePath()).isDirectory()).toBe(true);
+  });
+
+  it('optional session lookup does not reuse an expired cache', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'))));
+    const auth = await import('../auth.ts');
+    await auth.loginFromCookieStdin(cookieStdin('dbcl2=mock-account'));
+    vi.setSystemTime(new Date('2026-02-01T00:00:01.000Z'));
+    await expect(auth.getOptionalSessionCookies()).resolves.toBeUndefined();
+  });
+
   it('ensureAuth uses only the local cache and never scans browsers implicitly', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

@@ -2,8 +2,7 @@ import path from 'node:path';
 import { chmodSync, lstatSync, readFileSync, unlinkSync } from 'node:fs';
 import { Command } from 'commander';
 import { ensureAuth, getOptionalSessionCookies } from '../auth.js';
-import { getUserCollectionPage } from '../api/collection.js';
-import { getUserCollection } from '../api/user.js';
+import { getUserCollectionPageWithSession } from '../api/account.js';
 import { withErrorHandler } from '../utils/error.js';
 import { pageToOffset, parsePositiveInt } from '../utils/parsing.js';
 import { withSpinner } from '../utils/spinner.js';
@@ -118,13 +117,13 @@ export function registerUserCommands(program: Command): void {
       const limit = parsePositiveInt(opts.limit, '--limit', 15);
       const page = parsePositiveInt(opts.page, '--page', 1);
       const startForPage = pageToOffset(page, limit);
-      // Douban requires a login session for collection pages; reuse the local one when present.
+      // Reuse the local session to include collections visible only when signed in.
       const cookies = await getOptionalSessionCookies();
 
       if (opts.json) {
         const result = await withSpinner(
           `正在获取用户 ${userId} 的${statusLabel}片单...`,
-          () => getUserCollectionPage(
+          () => getUserCollectionPageWithSession(
             {
               kind: 'movie',
               userId,
@@ -150,7 +149,7 @@ export function registerUserCommands(program: Command): void {
           const start = pageToOffset(currentPage, limit);
           const result = await withSpinner(
             `正在获取用户 ${userId} 的${statusLabel}片单...`,
-            () => getUserCollectionPage(
+            () => getUserCollectionPageWithSession(
               {
                 kind: 'movie',
                 userId,
@@ -245,11 +244,13 @@ export function registerUserCommands(program: Command): void {
       const { status, label: statusLabel } = resolveCollectionStatus(opts);
       const config = readConfig();
       let userId = config.user?.trim();
+      let cookies: string | undefined;
 
       if (!userId) {
         try {
           const auth = await withSpinner('正在识别当前登录用户...', () => ensureAuth(), !opts.json);
           userId = auth.accountId;
+          cookies = auth.cookies;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           throw new Error(`本地登录态无法识别当前账号：${message}。请重新运行 douban login 或配置 --user`, {
@@ -263,11 +264,16 @@ export function registerUserCommands(program: Command): void {
         throw new Error('无法识别当前用户，请先运行 douban login 或 douban config --user <id>');
       }
 
-      const items = await withSpinner(
+      cookies ??= await getOptionalSessionCookies();
+      const result = await withSpinner(
         `正在获取我的${statusLabel}片单...`,
-        () => getUserCollection(userId, status, limit),
+        () => getUserCollectionPageWithSession({
+          kind: 'movie', userId, status, start: 0, count: limit
+        }, cookies),
         !opts.json
       );
+      result.warnings.forEach((warning) => console.error(`⚠️ ${warning}`));
+      const items = result.items;
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
