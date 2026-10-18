@@ -3,6 +3,54 @@ import { debug } from '../utils/debug.js';
 
 export type SubjectKind = 'movie' | 'book';
 
+export interface Top250Subject {
+  id: string;
+  title: string;
+  rank: number;
+  rating: string;
+  votes: string;
+  meta: string;
+  cover: string;
+  description: string;
+  url: string;
+}
+
+/** Public mobile ranking source for desktop pages that require verification. */
+export async function getTop250Subjects(kind: SubjectKind, start: number): Promise<Top250Subject[]> {
+  if (!Number.isInteger(start) || start < 0) throw new Error('start 必须是非负整数');
+  const collection = `${kind}_top250`;
+  const url = `https://m.douban.com/rexxar/api/v2/subject_collection/${collection}/items?start=${start}&count=25`;
+  const data = await fetchJson<unknown>(url, {
+    Referer: `https://m.douban.com/subject_collection/${collection}`
+  });
+  if (!isRecord(data) || !Array.isArray(data.subject_collection_items)
+    || data.start !== start) {
+    throw new ResponseSchemaError('Top250 移动榜单返回格式或分页起点异常', url);
+  }
+  const items = data.subject_collection_items.flatMap((item, index): Top250Subject[] => {
+    if (!isRecord(item)) return [];
+    const id = String(item.id ?? '');
+    const title = typeof item.title === 'string' ? cleanText(item.title) : '';
+    if (!/^\d+$/.test(id) || !title) return [];
+    const rating = isRecord(item.rating) ? item.rating : {};
+    return [{
+      id,
+      title,
+      rank: Number.isInteger(item.rank) && Number(item.rank) > 0 ? Number(item.rank) : start + index + 1,
+      rating: typeof rating.value === 'number' && Number.isFinite(rating.value) ? rating.value.toFixed(1) : '-',
+      votes: typeof rating.count === 'number' ? `${rating.count}人评价` : '-',
+      meta: typeof item.card_subtitle === 'string' ? cleanText(item.card_subtitle) : '-',
+      cover: typeof item.cover_url === 'string' ? item.cover_url : '',
+      description: typeof item.description === 'string' ? cleanText(item.description) : '',
+      url: `https://${kind}.douban.com/subject/${id}/`
+    }];
+  });
+  if (items.length !== data.subject_collection_items.length || (items.length === 0 && start < 250)) {
+    throw new ResponseSchemaError('Top250 移动榜单包含无效条目', url);
+  }
+  return items;
+}
+
 export interface SubjectReviewItem {
   id: string;
   user: string;

@@ -3,6 +3,7 @@ import {
   cleanText,
   fetchHtml,
   fetchJson,
+  HttpRequestError,
   isChallengePage,
   isRecord,
   normalizeTitle,
@@ -19,6 +20,7 @@ import {
   getSubjectComments,
   getSubjectRatingStats,
   getSubjectReviews,
+  getTop250Subjects,
   type SubjectPaginatedResult,
   type SubjectCommentItem,
   type SubjectRatingStats,
@@ -157,12 +159,24 @@ export async function getBookTop250(start = 0, limit = 20): Promise<BookItem[]> 
   const results: BookItem[] = [];
   const seen = new Set<string>();
   let pageStart = start;
+  let useMobile = false;
 
   while (results.length < limit) {
-    const html = await fetchHtml(`${BOOK_BASE}/top250?start=${pageStart}`, { Referer: BOOK_BASE });
-    if (isChallengePage(html)) throw new Error('图书 Top250 页面触发了反爬挑战，暂时无法解析');
-
-    const pageItems = parseBookTop250Page(html);
+    let pageItems: BookItem[];
+    try {
+      if (useMobile) {
+        pageItems = await getTop250Subjects('book', pageStart);
+      } else {
+        const html = await fetchHtml(`${BOOK_BASE}/top250?start=${pageStart}`, { Referer: BOOK_BASE });
+        pageItems = parseBookTop250Page(html);
+      }
+    } catch (error) {
+      if (useMobile) throw error;
+      if (error instanceof HttpRequestError && error.status === 429) throw error;
+      debug('book', `Top250 桌面页不可用，改用移动榜单: ${error instanceof Error ? error.message : String(error)}`);
+      useMobile = true;
+      pageItems = await getTop250Subjects('book', pageStart);
+    }
     if (pageItems.length === 0 && pageStart < 250) {
       throw new ResponseSchemaError('图书 Top250 页面未解析出预期条目', `${BOOK_BASE}/top250?start=${pageStart}`);
     }

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getBookChart, getLatestBooks, searchBooks } from '../api/book.ts';
+import { getBookChart, getBookTop250, getLatestBooks, searchBooks } from '../api/book.ts';
 import { getUserCollectionPage } from '../api/collection.ts';
 import { getHot, getMovieDetail, getRank, getTop250 } from '../api/movie.ts';
 import { parseMovieSearchPage, searchMovies } from '../api/search.ts';
@@ -87,6 +87,37 @@ describe('search reliability', () => {
 });
 
 describe('movie source orchestration', () => {
+  it.each(['movie', 'book'] as const)('uses public mobile %s Top250 pagination after a desktop challenge', async (kind) => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.hostname !== 'm.douban.com') {
+        return htmlResponse('<form name="sec" id="sec">安全验证</form>');
+      }
+      const start = Number(url.searchParams.get('start'));
+      return Response.json({ start, subject_collection_items: Array.from({ length: 25 }, (_, index) => ({
+        id: String(start + index + 1), title: `Item ${start + index + 1}`,
+        rank: start + index + 1, rating: { value: 9.1, count: 100 },
+        card_subtitle: '2026 / 中国 / 剧情 / 导演 / 演员'
+      })) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const items = await (kind === 'movie' ? getTop250(0, 30) : getBookTop250(0, 30));
+
+    expect(items).toHaveLength(30);
+    expect(items[0]).toMatchObject({ rank: 1, title: 'Item 1', rating: '9.1' });
+    expect(items[29]).toMatchObject({ rank: 30, title: 'Item 30' });
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).hostname))
+      .toEqual([`${kind}.douban.com`, 'm.douban.com', 'm.douban.com']);
+  });
+
+  it.each(['movie', 'book'] as const)('does not switch %s Top250 sources during a rate-limit cooldown', async (kind) => {
+    const fetchMock = vi.fn(async () => new Response('busy', { status: 429, headers: { 'Retry-After': '120' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(kind === 'movie' ? getTop250() : getBookTop250()).rejects.toMatchObject({ status: 429 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('returns structured schema errors for malformed list endpoints', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const url = String(input);

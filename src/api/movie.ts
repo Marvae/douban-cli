@@ -1,8 +1,9 @@
-import { BASE, cleanText, extractField, fetchHtml, fetchJson, isChallengePage, isRecord, normalizeTitle, ResponseSchemaError } from './common.js';
+import { BASE, cleanText, extractField, fetchHtml, fetchJson, HttpRequestError, isChallengePage, isRecord, normalizeTitle, ResponseSchemaError } from './common.js';
 import {
   getSubjectComments,
   getSubjectRatingStats,
   getSubjectReviews,
+  getTop250Subjects,
   type SubjectCommentItem,
   type SubjectPaginatedResult,
   type SubjectRatingStats,
@@ -516,9 +517,39 @@ export async function getTop250(start = 0, limit = 25): Promise<Top250Item[]> {
   const results: Top250Item[] = [];
   const seen = new Set<string>();
   let pageStart = start;
+  let useMobile = false;
 
   while (results.length < limit) {
-    const html = await fetchHtml(`${BASE}/top250?start=${pageStart}`);
+    let html = '';
+    if (!useMobile) {
+      try {
+        html = await fetchHtml(`${BASE}/top250?start=${pageStart}`);
+      } catch (error) {
+        if (error instanceof HttpRequestError && error.status === 429) throw error;
+        debug('movie', `Top250 桌面页不可用，改用移动榜单: ${error instanceof Error ? error.message : String(error)}`);
+        useMobile = true;
+      }
+    }
+    if (useMobile) {
+      const page = await getTop250Subjects('movie', pageStart);
+      let added = 0;
+      for (const item of page) {
+        if (seen.has(item.url)) continue;
+        seen.add(item.url);
+        const parts = item.meta.split('/').map((part) => part.trim());
+        results.push({
+          rank: item.rank, title: item.title, rating: item.rating, quote: item.description,
+          year: parts[0]?.match(/\d{4}/)?.[0] || '-',
+          director: parts.length >= 5 ? parts[3] || '-' : '-',
+          url: item.url
+        });
+        added += 1;
+        if (results.length >= limit) break;
+      }
+      if (added === 0 || page.length < 25 || pageStart + 25 >= 250) break;
+      pageStart += 25;
+      continue;
+    }
     if (isChallengePage(html)) throw new Error('电影 Top250 页面触发了反爬挑战，暂时无法解析');
 
     // Split by item blocks
