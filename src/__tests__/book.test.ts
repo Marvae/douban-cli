@@ -97,6 +97,15 @@ describe('book parsers', () => {
 });
 
 describe('book API orchestration', () => {
+  it('preserves a blocked ISBN search when suggestions contain no matches', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => (
+      String(input).includes('/subject_search')
+        ? new Response('<form name="sec" id="sec">安全验证</form>')
+        : Response.json([])
+    )));
+    await expect(searchBooks('9787020002207')).rejects.toMatchObject({ code: 'CHALLENGE' });
+  });
+
   it('rejects malformed annotation responses instead of returning an empty list', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({})));
 

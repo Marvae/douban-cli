@@ -334,7 +334,9 @@ export async function searchBooks(keyword: string, start = 0, limit = 20): Promi
     return [];
   }
   try {
-    return await searchBookSuggestions(query, limit);
+    const suggestions = await searchBookSuggestions(query, limit);
+    if (suggestions.length === 0 && firstPageError) throw firstPageError;
+    return suggestions;
   } catch (suggestionError) {
     if (firstPageError) throw firstPageError;
     throw suggestionError;
