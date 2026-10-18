@@ -175,7 +175,15 @@ function createErrorPayload(error: unknown, ctx: CommandErrorContext): CliErrorP
   const rawMessage = toMessage(error);
   const message = redactSensitiveArguments(rawMessage);
   const target = ctx.target ? redactSensitiveArguments(ctx.target) : undefined;
-  const suggestion = ctx.suggestion ? redactSensitiveArguments(ctx.suggestion) : undefined;
+  let recovery = ctx.suggestion;
+  if (error instanceof Error && 'code' in error) {
+    if (error.code === 'CHALLENGE') {
+      recovery = '豆瓣要求安全验证，请暂停请求；可在浏览器中完成验证后再试，避免连续重试。';
+    } else if (error.code === 'HTTP_STATUS' && 'status' in error && error.status === 429) {
+      recovery = '请求已被限流，请按服务端 Retry-After 指定的时间等待，避免连续重试。';
+    }
+  }
+  const suggestion = recovery ? redactSensitiveArguments(recovery) : undefined;
   return {
     ok: false,
     error: {

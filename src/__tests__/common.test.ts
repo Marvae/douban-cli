@@ -41,6 +41,21 @@ describe('api/common helpers', () => {
     expect(delays).toEqual([2000]);
   });
 
+  it('stops instead of shortening a server-requested rate-limit cooldown', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('busy', {
+      status: 429,
+      headers: { 'Retry-After': '120' }
+    }));
+    const sleep = vi.fn();
+    const client = new HttpClient({ fetchImpl: fetchMock, sleep, maxRetryDelayMs: 10000 });
+
+    await expect(client.getHtml('https://movie.douban.com/test')).rejects.toMatchObject({
+      status: 429, attempts: 1
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
   it('exposes the final response URL without changing getHtml output', async () => {
     const response = new Response('<html>profile</html>', {
       status: 200,

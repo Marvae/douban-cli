@@ -200,7 +200,11 @@ export class HttpClient {
 
         if (!response.ok) {
           const retryable = RETRYABLE_STATUS.has(response.status);
-          if (retryable && attempt < this.maxAttempts) {
+          const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
+          // Stop rather than retry earlier than the server permits when its
+          // requested cooldown exceeds this client's automatic wait budget.
+          if (retryable && attempt < this.maxAttempts
+            && (retryAfterMs === null || retryAfterMs <= this.maxRetryDelayMs)) {
             await this.sleep(this.retryDelayMs(attempt, response.headers.get('retry-after')));
             continue;
           }
