@@ -17,15 +17,24 @@ import { getOptionalSessionCookies } from '../auth/index.js';
 import { CliArgumentError, printWarnings, withErrorHandler } from '../utils/error.js';
 import {
   getPageRange,
-  isNumericId,
   pageToOffset,
   parseNonNegativeInt,
   parsePositiveInt,
   parsePositiveIntAtMost
 } from '../utils/parsing.js';
 import { withSpinner } from '../ui/spinner.js';
-import { compactNumber, formatTrend, printListHeading, printPosts, printRatingBars, renderTable, subjectLabel } from '../ui/output.js';
+import {
+  compactNumber,
+  formatTrend,
+  idColumn,
+  printListHeading,
+  printPosts,
+  printRatingBars,
+  renderTable,
+  subjectLabel
+} from '../ui/output.js';
 import { withPagination } from '../ui/pagination.js';
+import { resolveSubject } from './resolve.js';
 
 const TV_TAGS = ['热门', '美剧', '英剧', '日剧', '韩剧', '国产剧', '综艺', '最新'] as const;
 
@@ -67,30 +76,6 @@ function formatDetailList(values: string[] | undefined): string {
   return values.join(' / ');
 }
 
-function normalizeMovieIdInput(value: string, fieldName = '电影 ID'): string {
-  const id = value.trim();
-  if (!isNumericId(id)) {
-    throw new Error(`${fieldName} 必须是纯数字: ${value}`);
-  }
-  return id;
-}
-
-/** Accept a numeric subject ID or a title; titles are resolved through search with the local session. */
-async function resolveMovie(input: string, outputJson: boolean): Promise<{ id: string; title?: string }> {
-  const query = input.trim();
-  if (!query) throw new Error('电影 ID 或片名不能为空');
-  if (isNumericId(query)) return { id: query };
-
-  const warnings: string[] = [];
-  const cookies = await getOptionalSessionCookies();
-  const [matched] = await searchMovies(query, 0, 1, { cookies, warnings });
-  printWarnings(warnings);
-  if (!matched?.id) throw new Error(`未找到电影：${query}`);
-  const movieId = normalizeMovieIdInput(matched.id, '匹配到的电影 ID');
-  if (!outputJson) console.log(`\n🔎 已匹配为 ${subjectLabel(movieId, matched.title)}`);
-  return { id: movieId, title: matched.title };
-}
-
 export function registerMovieCommands(program: Command): void {
   program
     .command('hot')
@@ -121,7 +106,7 @@ export function registerMovieCommands(program: Command): void {
           { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
           { header: '片名', value: (item) => item.title, minWidth: 18 },
           { header: '评分', value: (item) => item.rating },
-          { header: 'ID', value: (item) => item.id }
+          idColumn()
         ]);
       }
     }));
@@ -156,7 +141,7 @@ export function registerMovieCommands(program: Command): void {
           { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
           { header: '片名', value: (item) => item.title, minWidth: 18 },
           { header: '评分', value: (item) => item.rating },
-          { header: 'ID', value: (item) => item.id }
+          idColumn()
         ]);
       }
     }));
@@ -196,7 +181,7 @@ export function registerMovieCommands(program: Command): void {
           { header: '类型', value: (item) => formatTags(item.types), minWidth: 14 },
           { header: '评分', value: (item) => item.rating },
           { header: '评价', value: (item) => compactNumber(item.rating_count) },
-          { header: 'ID', value: (item) => item.id }
+          idColumn()
         ]);
       }
     }));
@@ -253,7 +238,7 @@ export function registerMovieCommands(program: Command): void {
             { header: '年份', value: (item) => item.year || '-', minWidth: 4 },
             { header: '评分', value: (item) => item.rating || '-', minWidth: 4 },
             { header: '导演', value: (item) => item.director, maxWidth: 20 },
-            { header: 'ID', value: (item) => item.id }
+            idColumn()
           ]);
         }
       });
@@ -281,7 +266,7 @@ export function registerMovieCommands(program: Command): void {
           { header: '片名', value: (item) => item.title, minWidth: 18 },
           { header: '评分', value: (item) => item.rating },
           { header: '上映', value: (item) => item.release_date },
-          { header: 'ID', value: (item) => item.id }
+          idColumn()
         ]);
       }
     }));
@@ -314,7 +299,7 @@ export function registerMovieCommands(program: Command): void {
           { header: '类型', value: (item) => formatTags(item.types), minWidth: 16 },
           { header: '地区', value: (item) => formatRegion(item.regions), minWidth: 10 },
           { header: '想看', value: (item) => compactNumber(item.wish_count) },
-          { header: 'ID', value: (item) => item.id }
+          idColumn()
         ]);
       }
     }));
@@ -344,7 +329,7 @@ export function registerMovieCommands(program: Command): void {
           { header: '#', value: (item) => String(item.rank), minWidth: 2 },
           { header: '片名', value: (item) => item.title, minWidth: 18 },
           { header: '变化', value: (item) => formatTrend(item.trend) || '—' },
-          { header: 'ID', value: (item) => item.id }
+          idColumn()
         ]);
       }
     }));
@@ -387,7 +372,7 @@ export function registerMovieCommands(program: Command): void {
           { header: '类型', value: (item) => (item.type === 'tv' ? '剧集' : item.type === 'movie' ? '电影' : '-') },
           { header: '年份', value: (item) => normalizeYear(item.year) },
           { header: '评分', value: (item) => (item.rating && item.rating !== '-' ? item.rating : '-') },
-          { header: 'ID', value: (item) => item.id || '-' }
+          idColumn()
         ]);
       }
     }));
@@ -402,7 +387,7 @@ export function registerMovieCommands(program: Command): void {
       target: `ID: ${String(args[0] || '未指定')}`,
       suggestion: '确认 ID 是否正确，可使用 douban search 搜索'
     }), async (id, opts) => {
-      const { id: movieId } = await resolveMovie(id, Boolean(opts.json));
+      const { id: movieId } = await resolveSubject('movie', id, Boolean(opts.json));
 
       const detail = await withSpinner(
         '正在获取电影详情...',
@@ -452,7 +437,7 @@ export function registerMovieCommands(program: Command): void {
       target: `ID: ${String(args[0] || '未指定')}`,
       suggestion: '可尝试：douban rating 1292052'
     }), async (id, opts) => {
-      const { id: movieId } = await resolveMovie(id, Boolean(opts.json));
+      const { id: movieId } = await resolveSubject('movie', id, Boolean(opts.json));
       const stats = await withSpinner(
         '正在获取评分分布...',
         () => getRatingStats(movieId),
@@ -491,7 +476,7 @@ export function registerMovieCommands(program: Command): void {
       target: `ID: ${String(args[0] || '未指定')}`,
       suggestion: '可尝试：douban comments 1292052'
     }), async (movieId, opts) => {
-      const { id, title } = await resolveMovie(movieId, Boolean(opts.json));
+      const { id, title } = await resolveSubject('movie', movieId, Boolean(opts.json));
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const page = parsePositiveInt(opts.page, '--page', 1);
 
@@ -545,7 +530,7 @@ export function registerMovieCommands(program: Command): void {
       target: `ID: ${String(args[0] || '未指定')}`,
       suggestion: '可尝试：douban reviews 1292052 --page 2'
     }), async (movieId, opts) => {
-      const { id, title } = await resolveMovie(movieId, Boolean(opts.json));
+      const { id, title } = await resolveSubject('movie', movieId, Boolean(opts.json));
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const page = parsePositiveInt(opts.page, '--page', 1);
 

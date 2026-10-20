@@ -3,7 +3,7 @@ import { getUserCollectionPageWithSession, type CollectionStatus } from '../api/
 import type { SubjectKind } from '../api/subject.js';
 import { ensureAuth, getOptionalSessionCookies } from '../auth/index.js';
 import { readConfig } from '../storage/config.js';
-import { printCollectionItems } from '../ui/output.js';
+import { printCollectionItems, STATUS_LABELS } from '../ui/output.js';
 import { withPagination } from '../ui/pagination.js';
 import { withSpinner } from '../ui/spinner.js';
 import { CliArgumentError, printWarnings, withErrorHandler } from '../utils/error.js';
@@ -20,12 +20,12 @@ async function showCollection(options: {
   userId: string;
   mine: boolean;
   status: CollectionStatus;
-  statusLabel: string;
   page?: string;
   limit?: string;
   json?: boolean;
 }): Promise<void> {
-  const { kind, userId, status, statusLabel } = options;
+  const { kind, userId, status } = options;
+  const statusLabel = STATUS_LABELS[kind][status];
   const page = parsePositiveInt(options.page, '--page', 1);
   const limit = parsePositiveInt(options.limit, '--limit', COLLECTION_PAGE_SIZE);
   const noun = kind === 'movie' ? '片单' : '书单';
@@ -63,7 +63,7 @@ async function showCollection(options: {
  * The user for `me` and `book me`: the configured `config --user`, otherwise
  * the signed-in account.
  */
-async function resolveCurrentUser(showSpinner: boolean): Promise<string> {
+export async function resolveCurrentUser(showSpinner: boolean): Promise<string> {
   const configured = readConfig().user?.trim();
   if (configured) return configured;
   try {
@@ -75,24 +75,21 @@ async function resolveCurrentUser(showSpinner: boolean): Promise<string> {
   }
 }
 
-function resolveMovieStatus(opts: { wish?: boolean; doing?: boolean }): {
-  status: CollectionStatus;
-  statusLabel: string;
-} {
-  if (opts.wish && opts.doing) throw new CliArgumentError('--wish 和 --doing 不能同时使用');
-  if (opts.wish) return { status: 'wish', statusLabel: '想看' };
-  if (opts.doing) return { status: 'do', statusLabel: '在看' };
-  return { status: 'collect', statusLabel: '看过' };
-}
-
-export function resolveBookStatus(opts: { wish?: boolean; reading?: boolean }): {
-  status: CollectionStatus;
-  statusLabel: string;
-} {
-  if (opts.wish && opts.reading) throw new CliArgumentError('--wish 和 --reading 不能同时使用');
-  if (opts.wish) return { status: 'wish', statusLabel: '想读' };
-  if (opts.reading) return { status: 'do', statusLabel: '在读' };
-  return { status: 'collect', statusLabel: '读过' };
+/**
+ * Statuses picked by --wish or --doing (--reading for books); all three when
+ * neither is given. Lists show the first, which is 看过/读过 by default.
+ */
+export function pickStatuses(
+  kind: SubjectKind,
+  opts: { wish?: boolean; doing?: boolean; reading?: boolean }
+): CollectionStatus[] {
+  const inProgress = kind === 'movie' ? opts.doing : opts.reading;
+  if (opts.wish && inProgress) {
+    throw new CliArgumentError(`--wish 和 ${kind === 'movie' ? '--doing' : '--reading'} 不能同时使用`);
+  }
+  if (opts.wish) return ['wish'];
+  if (inProgress) return ['do'];
+  return ['collect', 'wish', 'do'];
 }
 
 /** `user` and `me` for movies, `book user` and `book me` for books. */
@@ -111,7 +108,7 @@ export function registerCollectionCommands(program: Command, book: Command): voi
       target: `用户ID: ${String(args[0] || '未指定')}`,
       suggestion: '可尝试：douban user <userId> --wish'
     }), (userId, opts) => showCollection({
-      kind: 'movie', userId, mine: false, ...resolveMovieStatus(opts), page: opts.page, limit: opts.limit, json: opts.json
+      kind: 'movie', userId, mine: false, status: pickStatuses('movie', opts)[0], page: opts.page, limit: opts.limit, json: opts.json
     })));
 
   program
@@ -129,7 +126,7 @@ export function registerCollectionCommands(program: Command, book: Command): voi
     }, async (opts) => {
       const userId = await resolveCurrentUser(!opts.json);
       await showCollection({
-        kind: 'movie', userId, mine: true, ...resolveMovieStatus(opts), page: opts.page, limit: opts.limit, json: opts.json
+        kind: 'movie', userId, mine: true, status: pickStatuses('movie', opts)[0], page: opts.page, limit: opts.limit, json: opts.json
       });
     }));
 
@@ -146,7 +143,7 @@ export function registerCollectionCommands(program: Command, book: Command): voi
       target: `用户ID: ${String(args[0] || '未指定')}`,
       suggestion: '可尝试：douban book user <userId> --wish'
     }), (userId, opts) => showCollection({
-      kind: 'book', userId, mine: false, ...resolveBookStatus(opts), page: opts.page, limit: opts.limit, json: opts.json
+      kind: 'book', userId, mine: false, status: pickStatuses('book', opts)[0], page: opts.page, limit: opts.limit, json: opts.json
     })));
 
   book
@@ -163,7 +160,7 @@ export function registerCollectionCommands(program: Command, book: Command): voi
     }, async (opts) => {
       const userId = await resolveCurrentUser(!opts.json);
       await showCollection({
-        kind: 'book', userId, mine: true, ...resolveBookStatus(opts), page: opts.page, limit: opts.limit, json: opts.json
+        kind: 'book', userId, mine: true, status: pickStatuses('book', opts)[0], page: opts.page, limit: opts.limit, json: opts.json
       });
     }));
 }

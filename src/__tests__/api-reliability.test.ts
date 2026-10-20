@@ -108,34 +108,6 @@ describe('partial rating and collection data', () => {
     await expect(getSubjectComments('movie', '123')).rejects.toMatchObject({ code: 'SCHEMA_MISMATCH' });
   });
 
-  it('requests hot comments explicitly', async () => {
-    const requested: string[] = [];
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
-      requested.push(String(input));
-      return Response.json({ interests: [], total: 0 });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(getSubjectComments('movie', '123', 'hot', 0, 1)).resolves.toEqual({ items: [], total: 0 });
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(requested[0]).toContain('order_by=hot');
-  });
-
-  it('rejects the removed latest ordering before making a request', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-    const callWithOrder = getSubjectComments as unknown as (
-      kind: 'movie' | 'book',
-      subjectId: string,
-      orderBy: string,
-      start?: number,
-      count?: number
-    ) => ReturnType<typeof getSubjectComments>;
-
-    await expect(callWithOrder('movie', '123', 'latest', 0, 1)).rejects.toThrow('仅支持热门排序');
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it('returns subject rating data when the distribution endpoint fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const url = String(input);

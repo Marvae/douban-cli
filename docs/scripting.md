@@ -15,6 +15,7 @@ douban whoami --json
 - 结果可能不完整时，提示写到 stderr（以 `⚠️` 开头），stdout 的 JSON 保持可解析。
 - `export --format json` 与 `book export --format json` 是文件格式选项，不会把 JSON 打到 stdout。
 - 需要稳定脚本行为时，以具体命令的 `--help` 和 JSON 字段为准，不要解析人类可读表格。
+- 在终端里，列表中的 ID 是可点击的链接（终端支持时）；`--json`、管道和重定向的输出始终是纯文本。
 
 ## 交互翻页
 

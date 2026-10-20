@@ -1,9 +1,9 @@
 // Login through a browser or from pasted cookies.
 import { lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { stdin as input, stderr as promptOutput } from 'node:process';
-import readline from 'node:readline/promises';
+import { stdin as input } from 'node:process';
 import { CliArgumentError } from '../utils/error.js';
+import { ask } from '../ui/prompt.js';
 import {
   type BrowserName,
   type LoginOptions,
@@ -129,31 +129,20 @@ export function assertInteractiveLogin(isTTY: boolean | undefined): void {
 }
 /** Ask before opening the login page; declining ends the login. */
 async function offerLoginPage(options: LoginOptions & { browser: BrowserName }): Promise<void> {
-  const rl = readline.createInterface({ input, output: promptOutput });
   const source = sourceLabel(options.browser, options.profile);
-  let answer: string;
-  try {
-    answer = await rl.question(`${source} 里还没有登录豆瓣。要在 ${source} 中打开豆瓣登录页吗？[Y/n] `);
-  } finally {
-    rl.close();
-  }
-  if (/^n/i.test(answer.trim())) {
+  const answer = await ask(`${source} 里还没有登录豆瓣。要在 ${source} 中打开豆瓣登录页吗？[Y/n] `);
+  if (/^n/i.test(answer)) {
     throw new Error(`未在 ${source} 中找到豆瓣登录：请先在浏览器登录豆瓣，或用 --browser 选择其他浏览器`);
   }
   openLoginPage(options);
 }
 async function waitForEnter(browser: BrowserName, profile: string | undefined, opened: boolean): Promise<void> {
   assertInteractiveLogin(input.isTTY);
-  const rl = readline.createInterface({ input, output: promptOutput });
   const source = sourceLabel(browser, profile);
   const preparation = opened
     ? `已打开 ${source} 的豆瓣当前账号页；该窗口仅用于完成登录。CLI 将从 ${source} 读取 Cookie，并以验证到的豆瓣账号为准。`
     : `将从 ${source} 读取 Cookie 并验证豆瓣账号。`;
-  try {
-    await rl.question(`${preparation}确认已登录后按回车；若 macOS 随后请求访问浏览器 Safe Storage，请选择允许...`);
-  } finally {
-    rl.close();
-  }
+  await ask(`${preparation}确认已登录后按回车；若 macOS 随后请求访问浏览器 Safe Storage，请选择允许...`);
 }
 export async function loginFromBrowserCookies(
   options: LoginOptions = {},

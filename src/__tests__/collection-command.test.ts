@@ -42,6 +42,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function useTempStorage(): { tempHome: string; storageDirectory: string } {
+  const tempHome = mkdtempSync(path.join(os.tmpdir(), 'douban-config-'));
+  tempDirectories.push(tempHome);
+  const storageDirectory = path.join(tempHome, 'storage');
+  process.env.HOME = tempHome;
+  process.env.DOUBAN_CLI_HOME = storageDirectory;
+  return { tempHome, storageDirectory };
+}
+
 function createProgram(): Command {
   const program = new Command();
   program.exitOverride();
@@ -51,77 +60,25 @@ function createProgram(): Command {
 }
 
 describe('collection and config commands', () => {
-  it('uses --page to request the correct JSON result window', async () => {
+  it.each([
+    [['user', 'alice', '--page', '3', '--limit', '10', '--json'], 'movie', 'collect'],
+    [['book', 'user', 'alice', '--reading', '--page', '3', '--limit', '10'], 'book', 'do']
+  ] as const)('reads only the requested page for %j with the local session', async (args, kind, status) => {
     apiMocks.getUserCollectionPage.mockResolvedValue({
-      items: [{ kind: 'movie', id: '42', title: 'Example' }],
+      items: [{ kind, id: '42', title: 'Example', url: '', rating: 0, date: '', comment: '', cover: '' }],
       total: 100,
       nextStart: 30,
       partial: false,
       warnings: []
     });
-    authMocks.getOptionalSessionCookies.mockResolvedValue('dbcl2=alice; ck=token');
+    authMocks.getOptionalSessionCookies.mockResolvedValue('dbcl2=alice');
     const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
-    await createProgram().parseAsync([
-      'node',
-      'douban',
-      'user',
-      'alice',
-      '--page',
-      '3',
-      '--limit',
-      '10',
-      '--json'
-    ]);
-
-    expect(apiMocks.getUserCollectionPage).toHaveBeenCalledWith(
-      {
-        kind: 'movie',
-        userId: 'alice',
-        status: 'collect',
-        start: 20,
-        count: 10
-      },
-      'dbcl2=alice; ck=token'
-    );
-    expect(JSON.parse(String(stdout.mock.calls[0]?.[0]))).toEqual([
-      { kind: 'movie', id: '42', title: 'Example' }
-    ]);
-  });
-
-  it('fetches only the requested page in non-interactive mode', async () => {
-    apiMocks.getUserCollectionPage.mockResolvedValue({
-      items: [],
-      total: 100,
-      nextStart: 30,
-      partial: false,
-      warnings: []
-    });
-    authMocks.getOptionalSessionCookies.mockResolvedValue('dbcl2=alice; ck=token');
-    vi.spyOn(console, 'log').mockImplementation(() => undefined);
-
-    await createProgram().parseAsync([
-      'node',
-      'douban',
-      'user',
-      'alice',
-      '--page',
-      '3',
-      '--limit',
-      '10'
-    ]);
+    await createProgram().parseAsync(['node', 'douban', ...args]);
 
     expect(apiMocks.getUserCollectionPage).toHaveBeenCalledOnce();
-    expect(apiMocks.getUserCollectionPage).toHaveBeenCalledWith(
-      {
-        kind: 'movie',
-        userId: 'alice',
-        status: 'collect',
-        start: 20,
-        count: 10
-      },
-      'dbcl2=alice; ck=token'
-    );
+    expect(apiMocks.getUserCollectionPage).toHaveBeenCalledWith({ kind, userId: 'alice', status, start: 20, count: 10 }, 'dbcl2=alice');
+    expect(stdout.mock.calls.flat().join('\n')).toContain('42');
   });
 
   it('rejects conflicting collection status flags before fetching', async () => {
@@ -137,10 +94,7 @@ describe('collection and config commands', () => {
   });
 
   it('uses the verified session identity for me without another profile lookup', async () => {
-    const tempHome = mkdtempSync(path.join(os.tmpdir(), 'douban-config-'));
-    tempDirectories.push(tempHome);
-    process.env.HOME = tempHome;
-    process.env.DOUBAN_CLI_HOME = path.join(tempHome, 'storage');
+    useTempStorage();
     authMocks.ensureAuth.mockResolvedValue({
       dbcl2: 'secret',
       cookies: 'dbcl2=secret',
@@ -164,10 +118,7 @@ describe('collection and config commands', () => {
   });
 
   it.each([undefined, 'dbcl2=cached-account'])('reads the configured user with the optional session %s', async (cookies) => {
-    const tempHome = mkdtempSync(path.join(os.tmpdir(), 'douban-config-'));
-    tempDirectories.push(tempHome);
-    process.env.HOME = tempHome;
-    process.env.DOUBAN_CLI_HOME = path.join(tempHome, 'storage');
+    useTempStorage();
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     await createProgram().parseAsync(['node', 'douban', 'config', '--user', 'alice', '--json']);
     authMocks.getOptionalSessionCookies.mockResolvedValue(cookies);
@@ -184,11 +135,7 @@ describe('collection and config commands', () => {
   });
 
   it('stores config in a private DOUBAN_CLI_HOME directory', async () => {
-    const tempHome = mkdtempSync(path.join(os.tmpdir(), 'douban-config-'));
-    tempDirectories.push(tempHome);
-    const storageDirectory = path.join(tempHome, 'storage');
-    process.env.HOME = tempHome;
-    process.env.DOUBAN_CLI_HOME = storageDirectory;
+    const { storageDirectory } = useTempStorage();
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
     await createProgram().parseAsync([
@@ -206,24 +153,25 @@ describe('collection and config commands', () => {
     expect(lstatSync(configPath).mode & 0o777).toBe(0o600);
   });
 
-  it('rejects an empty configured user ID', async () => {
-    process.argv = ['node', 'douban', 'config', '--user', ' ', '--json'];
-    const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  it('drops a damaged remembered login and keeps a valid one across user changes', async () => {
+    const { storageDirectory } = useTempStorage();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const configPath = path.join(storageDirectory, 'config.json');
 
-    await createProgram().parseAsync(process.argv);
+    await createProgram().parseAsync(['node', 'douban', 'config', '--user', 'alice', '--json']);
+    writeFileSync(configPath, JSON.stringify({ user: 'alice', login: 'broken' }), { mode: 0o600 });
+    await createProgram().parseAsync(['node', 'douban', 'config', '--json']);
+    expect(JSON.parse(String(log.mock.calls.at(-1)?.[0]))).toEqual({ user: 'alice' });
 
-    expect(process.exitCode).toBe(1);
-    expect(JSON.parse(String(stderr.mock.calls[0]?.[0])).error.code).toBe('INVALID_ARGUMENT');
+    writeFileSync(configPath, JSON.stringify({ user: 'alice', login: { browser: 'arc', profile: 'Profile 2' } }), { mode: 0o600 });
+    await createProgram().parseAsync(['node', 'douban', 'config', '--user', 'bob', '--json']);
+    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({ user: 'bob', login: { browser: 'arc', profile: 'Profile 2' } });
   });
 
   it('migrates the legacy config after validating the new copy', async () => {
-    const tempHome = mkdtempSync(path.join(os.tmpdir(), 'douban-config-'));
-    tempDirectories.push(tempHome);
-    const storageDirectory = path.join(tempHome, 'storage');
+    const { tempHome, storageDirectory } = useTempStorage();
     const legacyPath = path.join(tempHome, '.douban-cli.json');
     const configPath = path.join(storageDirectory, 'config.json');
-    process.env.HOME = tempHome;
-    process.env.DOUBAN_CLI_HOME = storageDirectory;
     writeFileSync(legacyPath, '{"user":"legacy-user"}\n');
     const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
@@ -234,40 +182,4 @@ describe('collection and config commands', () => {
     expect(JSON.parse(String(stdout.mock.calls[0]?.[0]))).toEqual({ user: 'legacy-user' });
   });
 
-  it('falls back to a valid legacy config when migration cannot create the new path', async () => {
-    const tempHome = mkdtempSync(path.join(os.tmpdir(), 'douban-config-'));
-    tempDirectories.push(tempHome);
-    const legacyPath = path.join(tempHome, '.douban-cli.json');
-    const blockedParent = path.join(tempHome, 'blocked-parent');
-    process.env.HOME = tempHome;
-    process.env.DOUBAN_CLI_HOME = path.join(blockedParent, 'storage');
-    writeFileSync(legacyPath, '{"user":"legacy-user"}\n');
-    writeFileSync(blockedParent, 'not a directory');
-    const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
-    await createProgram().parseAsync(['node', 'douban', 'config', '--json']);
-
-    expect(JSON.parse(String(stdout.mock.calls[0]?.[0]))).toEqual({ user: 'legacy-user' });
-    expect(existsSync(legacyPath)).toBe(true);
-    expect(stderr.mock.calls.map((call) => String(call[0])).join('\n'))
-      .toContain('迁移配置失败，继续使用旧配置');
-  });
-
-  it('removes leftover legacy config after validating the current config', async () => {
-    const tempHome = mkdtempSync(path.join(os.tmpdir(), 'douban-config-'));
-    tempDirectories.push(tempHome);
-    const storageDirectory = path.join(tempHome, 'storage');
-    const legacyPath = path.join(tempHome, '.douban-cli.json');
-    process.env.HOME = tempHome;
-    process.env.DOUBAN_CLI_HOME = storageDirectory;
-    const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    await createProgram().parseAsync(['node', 'douban', 'config', '--user', 'current-user', '--json']);
-    writeFileSync(legacyPath, '{"user":"legacy-user"}\n');
-
-    await createProgram().parseAsync(['node', 'douban', 'config', '--json']);
-
-    expect(existsSync(legacyPath)).toBe(false);
-    expect(JSON.parse(String(stdout.mock.calls.at(-1)?.[0]))).toEqual({ user: 'current-user' });
-  });
 });

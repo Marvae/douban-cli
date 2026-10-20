@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import {
   clearAuthCache,
+  detectDefaultBrowser,
   ensureAuth,
   loginFromCookieFile,
   loginFromCookieStdin,
@@ -8,6 +9,8 @@ import {
   type AuthSession,
   type BrowserName
 } from '../auth/index.js';
+import { readConfig, writeConfig, type CliConfig } from '../storage/config.js';
+import { debug } from '../utils/debug.js';
 import { CliArgumentError, withErrorHandler } from '../utils/error.js';
 import { parsePositiveIntAtMost } from '../utils/parsing.js';
 import { withSpinner } from '../ui/spinner.js';
@@ -28,6 +31,25 @@ function parseBrowserName(value: string | undefined): BrowserName | undefined {
     return normalized;
   }
   throw new Error('--browser 仅支持 chrome、arc、edge、firefox 或 safari');
+}
+
+/** The browser of the last browser login; a missing or damaged entry counts as none. */
+function rememberedLogin(): { browser: BrowserName; profile?: string } | undefined {
+  try {
+    const login = readConfig().login;
+    const browser = parseBrowserName(login?.browser);
+    return browser ? { browser, profile: login?.profile } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function rememberLogin(login: NonNullable<CliConfig['login']>): void {
+  try {
+    writeConfig({ ...readConfig(), login });
+  } catch (error) {
+    debug('login', `未能记住登录浏览器: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export function registerAuthCommands(program: Command): void {
@@ -70,23 +92,31 @@ export function registerAuthCommands(program: Command): void {
       } else if (cookieFile) {
         session = await loginFromCookieFile(cookieFile);
       } else {
-        const browser = parseBrowserName(opts.browser);
-        const profile = typeof opts.profile === 'string' ? opts.profile.trim() : undefined;
+        const explicit = parseBrowserName(opts.browser);
+        const explicitProfile = typeof opts.profile === 'string' ? opts.profile.trim() : undefined;
         const cookieTimeoutSeconds = parsePositiveIntAtMost(
           opts.cookieTimeout ?? '60',
           '--cookie-timeout',
           60,
           300
         );
-        if (profile && !browser) throw new Error('--profile 必须与 --browser 一起使用');
-        if (profile && browser === 'safari') throw new Error('Safari 不支持 --profile');
+        if (explicitProfile && !explicit) throw new Error('--profile 必须与 --browser 一起使用');
+        if (explicitProfile && explicit === 'safari') throw new Error('Safari 不支持 --profile');
 
+        // Without --browser, use the browser of the last browser login, then the system default.
+        const remembered = explicit ? undefined : rememberedLogin();
+        const browser = explicit ?? remembered?.browser ?? detectDefaultBrowser();
+        const profile = explicitProfile ?? (opts.open ? undefined : remembered?.profile);
+        if (remembered && !opts.json) {
+          console.log(`沿用上次登录的浏览器（--browser ${browser}${profile ? ` --profile ${profile}` : ''}）；换浏览器请指定 --browser`);
+        }
         session = await loginWithBrowser({
           browser,
           profile,
           cookieTimeoutMs: cookieTimeoutSeconds * 1000,
           open: Boolean(opts.open)
         });
+        rememberLogin({ browser, ...(profile ? { profile } : {}) });
       }
 
       if (opts.json) {

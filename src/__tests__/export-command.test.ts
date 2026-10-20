@@ -1,56 +1,58 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 
 const mocks = vi.hoisted(() => ({
   ensureAuth: vi.fn(),
-  getCollectionRecords: vi.fn(),
+  getOptionalSessionCookies: vi.fn(),
+  getPage: vi.fn(),
+  readConfig: vi.fn(),
   secureAtomicWriteFile: vi.fn(),
   sleep: vi.fn()
 }));
 
 vi.mock('../auth/index.js', () => ({
-  ensureAuth: mocks.ensureAuth
+  ensureAuth: mocks.ensureAuth,
+  getOptionalSessionCookies: mocks.getOptionalSessionCookies
 }));
 vi.mock('../api/collection.js', () => ({
-  getCollectionRecords: mocks.getCollectionRecords
+  getUserCollectionPageWithSession: mocks.getPage
 }));
-vi.mock('../api/mutations.js', () => ({
-  createReview: vi.fn(),
-  followUser: vi.fn(),
-  unfollowUser: vi.fn()
-}));
-vi.mock('../storage/secure-file.js', () => ({
-  secureAtomicWriteFile: mocks.secureAtomicWriteFile
-}));
+vi.mock('../storage/config.js', () => ({ readConfig: mocks.readConfig }));
+vi.mock('../storage/secure-file.js', () => ({ secureAtomicWriteFile: mocks.secureAtomicWriteFile }));
 vi.mock('../ui/spinner.js', () => ({
-  withSpinner: vi.fn(async (_message: string, task: () => Promise<unknown>) => task())
+  withSpinner: vi.fn(async (_message: unknown, task: () => Promise<unknown>) => task())
 }));
 vi.mock('../utils/timing.js', () => ({
-  parseDelaySeconds: vi.fn((value: string | undefined, fallback = Number.NaN) => (
-    typeof value === 'undefined' || value.trim() === '' ? fallback : Number(value)
-  )),
+  parseDelaySeconds: vi.fn((value: string | undefined, fallback: number) => (value === undefined ? fallback : Number(value))),
   sleep: mocks.sleep
 }));
 
 import { registerExportCommands } from '../commands/export.ts';
 
-function verifiedSession() {
-  return {
-    dbcl2: 'secret',
-    cookies: 'dbcl2=secret',
-    source: 'Chrome',
-    accountId: 'alice',
-    accountName: 'Alice',
-    updatedAt: '2026-08-10T00:00:00.000Z'
-  };
+function entry(id: string, date = '2026-08-10', overrides: Record<string, unknown> = {}) {
+  return { kind: 'movie', id, title: `Title ${id}`, url: `https://movie.douban.com/subject/${id}/`, rating: 4, date, comment: '', cover: '', ...overrides };
 }
 
-function createProgram(): Command {
+function page(items: unknown[], nextStart: number | null = null, extra: Record<string, unknown> = {}) {
+  return { items, total: items.length, nextStart, partial: false, warnings: [], ...extra };
+}
+
+async function run(...args: string[]): Promise<void> {
   const program = new Command();
   program.exitOverride();
   registerExportCommands(program, program.command('book'));
-  return program;
+  await program.parseAsync(['node', 'douban', ...args]);
 }
+
+const written = () => String(mocks.secureAtomicWriteFile.mock.calls[0]?.[1] ?? '');
+
+beforeEach(() => {
+  mocks.readConfig.mockReturnValue({});
+  mocks.ensureAuth.mockResolvedValue({ accountId: 'alice', accountName: 'Alice', cookies: 'dbcl2=secret' });
+  mocks.getOptionalSessionCookies.mockResolvedValue('dbcl2=secret');
+  vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  vi.spyOn(console, 'error').mockImplementation(() => undefined);
+});
 
 afterEach(() => {
   process.exitCode = undefined;
@@ -58,147 +60,86 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('stats and export commands', () => {
-  it('uses the verified session identity for stats', async () => {
-    mocks.ensureAuth.mockResolvedValue(verifiedSession());
-    mocks.getCollectionRecords.mockResolvedValue({ records: [], partial: false, warnings: [] });
-    const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+describe('export', () => {
+  it('backs up all three statuses of the signed-in account with the session and paced requests', async () => {
+    mocks.getPage
+      .mockResolvedValueOnce(page([entry('1')]))
+      .mockResolvedValueOnce(page([entry('2')]))
+      .mockResolvedValueOnce(page([]));
 
-    await createProgram().parseAsync(['node', 'douban', 'stats', '--year', '2026', '--json']);
+    await run('export', '-o', 'movies.md', '--delay', '2');
 
-    expect(mocks.ensureAuth).toHaveBeenCalledOnce();
-    expect(mocks.getCollectionRecords).toHaveBeenCalledWith(
-      'alice',
-      'collect',
-      1000,
-      'dbcl2=secret',
-      expect.objectContaining({ pageDelayMs: 1000 })
-    );
-    expect(JSON.parse(String(stdout.mock.calls[0]?.[0]))).toMatchObject({
-      user: {
-        id: 'alice',
-        name: 'Alice',
-        url: 'https://www.douban.com/people/alice/'
-      },
-      year: 2026,
-      metadata: {
-        partial: false,
-        warnings: []
-      }
-    });
-  });
-
-  it('accepts a smaller stats limit and a slower page interval', async () => {
-    mocks.ensureAuth.mockResolvedValue(verifiedSession());
-    mocks.getCollectionRecords.mockResolvedValue({ records: [], partial: false, warnings: [] });
-    vi.spyOn(console, 'log').mockImplementation(() => undefined);
-
-    await createProgram().parseAsync([
-      'node',
-      'douban',
-      'stats',
-      '--limit',
-      '30',
-      '--delay',
-      '2',
-      '--json'
-    ]);
-
-    expect(mocks.getCollectionRecords).toHaveBeenCalledWith(
-      'alice',
-      'collect',
-      30,
-      'dbcl2=secret',
-      expect.objectContaining({ pageDelayMs: 2000 })
-    );
-  });
-
-  it('reports partial stats in stderr and JSON metadata', async () => {
-    mocks.ensureAuth.mockResolvedValue(verifiedSession());
-    mocks.getCollectionRecords.mockResolvedValue({
-      records: [],
-      partial: true,
-      warnings: ['第二页获取失败']
-    });
-    const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
-    await createProgram().parseAsync(['node', 'douban', 'stats', '--year', '2026', '--json']);
-
-    const payload = JSON.parse(String(stdout.mock.calls[0]?.[0]));
-    expect(payload.metadata).toEqual({
-      partial: true,
-      warnings: ['第二页获取失败']
-    });
-    expect(stderr.mock.calls.flat().join('\n')).toContain('⚠️ 第二页获取失败');
-  });
-
-  it('uses the verified session identity for all export collections', async () => {
-    mocks.ensureAuth.mockResolvedValue(verifiedSession());
-    mocks.getCollectionRecords.mockResolvedValue({ records: [], partial: false, warnings: [] });
-    vi.spyOn(console, 'log').mockImplementation(() => undefined);
-
-    await createProgram().parseAsync([
-      'node',
-      'douban',
-      'export',
-      '--output',
-      '/tmp/records.json',
-      '--delay',
-      '2'
-    ]);
-
-    expect(mocks.ensureAuth).toHaveBeenCalledOnce();
-    expect(mocks.getCollectionRecords).toHaveBeenCalledTimes(3);
-    expect(mocks.getCollectionRecords.mock.calls.map((call) => call.slice(0, 4))).toEqual([
-      ['alice', 'collect', 1000, 'dbcl2=secret'],
-      ['alice', 'wish', 1000, 'dbcl2=secret'],
-      ['alice', 'do', 1000, 'dbcl2=secret']
-    ]);
-    mocks.getCollectionRecords.mock.calls.forEach((call) => {
-      expect(call[4]).toEqual(expect.objectContaining({ pageDelayMs: 2000 }));
-    });
+    expect(mocks.getPage.mock.calls.map(([options, cookies]) => [options.userId, options.status, options.pageDelayMs, cookies]))
+      .toEqual([['alice', 'collect', 2000, 'dbcl2=secret'], ['alice', 'wish', 2000, 'dbcl2=secret'], ['alice', 'do', 2000, 'dbcl2=secret']]);
     expect(mocks.sleep).toHaveBeenCalledTimes(2);
-    expect(mocks.sleep).toHaveBeenNthCalledWith(1, 2000);
-    expect(mocks.sleep).toHaveBeenNthCalledWith(2, 2000);
-    expect(mocks.secureAtomicWriteFile).toHaveBeenCalledWith(
-      '/tmp/records.json',
-      expect.stringContaining('"id": "alice"')
-    );
+    expect(written()).toContain('## 看过（1）');
+    expect(written()).toContain('## 在看（0）');
+    expect(written()).toContain('1. **Title 1** · ★★★★ · 2026-08-10');
   });
 
-  it('marks partial exports in stderr, metadata, and the completion message', async () => {
-    mocks.ensureAuth.mockResolvedValue(verifiedSession());
-    mocks.getCollectionRecords.mockImplementation(async (
-      _userId: string,
-      status: string
-    ) => ({
-      records: [],
-      partial: status === 'wish',
-      warnings: status === 'wish' ? ['第二页获取失败'] : []
-    }));
-    const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  it('exports one book status of another user and neutralizes spreadsheet formulas', async () => {
+    mocks.getPage.mockResolvedValueOnce(page([entry('7', '2026-01-02', { kind: 'book', title: '=HYPERLINK("x")' })]));
 
-    await createProgram().parseAsync([
-      'node',
-      'douban',
-      'export',
-      '--output',
-      '/tmp/partial-records.json',
-      '--delay',
-      '0'
+    await run('book', 'export', 'bob', '--reading', '-o', 'reading.csv');
+
+    expect(mocks.ensureAuth).not.toHaveBeenCalled();
+    expect(mocks.getPage).toHaveBeenCalledOnce();
+    expect(mocks.getPage.mock.calls[0]?.[0]).toMatchObject({ kind: 'book', userId: 'bob', status: 'do' });
+    expect(written().split('\n')[0]).toBe('"id","title","status","rating","date","comment","url"');
+    expect(written()).toContain(`"'=HYPERLINK(""x"")"`);
+  });
+
+  it('keeps earlier statuses when a later one fails or is cut short by the limit', async () => {
+    mocks.getPage
+      .mockResolvedValueOnce(page([entry('1'), entry('2')], 2))
+      .mockRejectedValueOnce(new Error('HTTP 403'));
+
+    await run('export', '-o', 'movies.json', '-n', '2');
+
+    const exported = JSON.parse(written());
+    expect(exported.items.map((item: { id: string; status: string }) => [item.id, item.status])).toEqual([['1', 'collect'], ['2', 'collect']]);
+    expect(exported.metadata.partial).toBe(true);
+    expect(exported.metadata.warnings).toEqual([
+      expect.stringContaining('只导出了前 2 条'),
+      expect.stringContaining('想看：读取失败，已停止：HTTP 403')
     ]);
+    expect(mocks.getPage).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain('结果不完整');
+  });
 
-    const payload = JSON.parse(String(mocks.secureAtomicWriteFile.mock.calls[0]?.[1]));
-    expect(payload.metadata).toEqual({
-      count: 0,
-      partial: true,
-      warnings: ['想看：第二页获取失败']
-    });
-    expect(stderr.mock.calls.flat().join('\n')).toContain('⚠️ 想看：第二页获取失败');
-    const completion = stdout.mock.calls.flat().join('\n');
-    expect(completion).toContain('结果可能不完整');
-    expect(completion).not.toContain('✅');
+  it.each([
+    [['export', '-o', 'x.txt', '--format', 'xml'], '--format 仅支持'],
+    [['book', 'export', '--wish', '--reading', '-o', 'x.json'], '不能同时使用']
+  ])('rejects %j before reading or writing', async (args, message) => {
+    await run(...args);
+    expect(mocks.getPage).not.toHaveBeenCalled();
+    expect(mocks.secureAtomicWriteFile).not.toHaveBeenCalled();
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(message);
+  });
+});
+
+describe('stats', () => {
+  it('counts the year and its average rating', async () => {
+    mocks.getPage.mockResolvedValueOnce(page([
+      entry('1', '2026-10-21', { rating: 3 }),
+      entry('2', '2026-03-01', { rating: 0 }),
+      entry('3', '2025-12-31', { rating: 5 })
+    ]));
+
+    await run('stats', '--year', '2026', '--json');
+
+    const result = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
+    expect(result).toMatchObject({ user: { id: 'alice' }, year: 2026, total: 2, avgScore: '3.00', metadata: { partial: false } });
+    expect(result.byMonth[9]).toBe(1);
+    expect(mocks.getPage.mock.calls[0]?.[0]).toMatchObject({ kind: 'movie', status: 'collect', count: 1000 });
+  });
+
+  it('warns when the limit stops inside the year', async () => {
+    mocks.getPage.mockResolvedValueOnce(page([entry('1', '2026-10-21'), entry('2', '2026-05-01')], 2));
+
+    await run('book', 'stats', '--year', '2026', '-n', '2', '--json');
+
+    const result = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
+    expect(result.metadata).toMatchObject({ partial: true, warnings: [expect.stringContaining('只读取了最近 2 条读过记录')] });
   });
 });

@@ -5,8 +5,9 @@ Unofficial Douban CLI: Node.js 22.13+, TypeScript ESM, Commander. `src/` builds 
 ## Layout
 
 - `src/commands/` — one file per command group: arguments, validation, `--json` output. Never calls `fetch` directly.
-  - `collection.ts` — `user`, `me`, `book user`, `book me`; `export.ts` — `stats`, `export`, `book export`; `social.ts` — `review`, `follow`.
-- `src/ui/` — terminal presentation shared by commands: tables, star and number formats, list layouts, interactive pagination, spinner, display width.
+  - `collection.ts` — `user`, `me`, `book user`, `book me`; `export.ts` — `stats` and `export` for movies and books; `social.ts` — `review`, `follow`.
+  - `resolve.ts` — turns what the user typed (ID, ISBN for books, or a title) into a subject.
+- `src/ui/` — terminal presentation shared by commands: tables, status names, terminal links, list layouts, prompts, interactive pagination, spinner, display width.
 - `src/api/` — Douban URLs, response validation and parsing; no terminal output.
   - `http/` — the read client: timeouts, retries for idempotent GETs, redirects, challenge/login detection, structured `HttpRequestError`.
   - `common.ts` — shared read helpers and `SessionReadOptions` (optional cookies and a warnings sink).
@@ -26,6 +27,7 @@ Unofficial Douban CLI: Node.js 22.13+, TypeScript ESM, Commander. `src/` builds 
 - Treat Douban HTML and JSON as untrusted; validate at the API boundary. A page that cannot be parsed, a challenge or HTTP 429 must raise a structured error, never an empty result.
 - Keep data that was fetched when a later page or source fails, and report it as partial (warnings on stderr, `partial`/`warnings` in JSON).
 - Public reads never read the auth cache implicitly. Commands may pass the cached session explicitly (`getOptionalSessionCookies`) where anonymous access is throttled or incomplete: search, title resolution, collections.
+- A write by title runs only as a dry run or after confirmation in a terminal; batch files take IDs (and ISBNs for books), never titles.
 - Writes always go through `record.ts`: start from the current form, change only requested fields, never submit `share-shuo`, and verify by reading back. Writes are never retried, except one `ck` refresh.
 - `--json` sends results to stdout and structured errors to stderr; non-TTY output never paginates interactively and ends with the next `--page` hint.
 - Keep movie- and book-specific code separate until both share the same contract.

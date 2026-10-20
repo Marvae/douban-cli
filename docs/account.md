@@ -22,6 +22,7 @@ douban login --cookie-timeout 120                  # 钥匙串授权较慢时延
 - macOS 读取 Chrome、Edge、Arc 的登录时会弹出钥匙串授权，每次登录只弹一次。选“允许”即可；“始终允许”以后不再询问，但本机其他程序也能借此读取这个浏览器的 Cookie。
 - Safari 和 Arc 仅支持 macOS；`--profile` 需要同时指定 `--browser`，且不能与 `--open` 同用。
 - 最终保存的账号以验证结果为准，可用 `douban whoami` 确认。
+- 会记住上次用的浏览器；下次直接 `douban login` 即可，换浏览器时加 `--browser`。
 
 读取浏览器失败时，可以手动导入（二选一，不会自动切换）：
 
@@ -47,42 +48,41 @@ douban mark 1292052 --wish                  # 电影：--wish / --watched / --wa
 douban book mark 2567698 --read             # 图书：--wish / --read / --reading
 douban rate 1292052 --score 5
 douban book comment 2567698 "值得重读" --tags 科幻,经典 --private
+douban book mark 9787544269506 --read      # 图书也可以直接用 ISBN
+douban mark 沙丘 --wish --dry-run           # 按名称：先预览匹配到的条目
 douban record 1292052                       # 查看自己对该条目的状态、评分、短评、标签和可见性
 douban book unmark 2567698 --dry-run        # 先预览，确认后去掉 --dry-run
 douban review 1292052 "标题" --file review.md  # 长评（仅电影）
 ```
 
+- 按名称修改时，会先显示匹配到的《名称》(ID)，在终端里确认后才写入；脚本和 AI 里请用 ID 或 ISBN。
 - 每次写入都会先读取当前记录，只修改你指定的字段，提交后再读回核对；评分、短评、标签和“仅自己可见”不会被意外清空，也从不勾选“分享到广播”。
 - `--dry-run` 只显示修改前后的对比，不提交。`--tags` 覆盖原有标签；`--private` / `--public` 切换可见性。
 - `rate` 会把条目标为看过/读过；`comment` 保留原状态，未标记时标为看过/读过；`unmark` 会删除整条记录（含评分、短评、标签）。
 - 写入失败不会自动重试；读回结果与预期不一致时会报错并提示用 `record` 核对。
 
-## 统计、导出与关注
+## 统计与备份
 
 ```bash
-douban stats --year 2026 --limit 30 --delay 2
-douban export --format json -o douban-export.json
-douban export --format csv -o douban-export.csv
+douban stats --year 2026                    # 某一年看过多少、平均几星、每月几部
+douban book stats --year 2026               # 读书统计
+douban export -o my-movies.json             # 备份自己的看过/想看/在看
+douban book export -o my-books.md           # 备份自己的读过/想读/在读
+douban book export USER_ID --reading -o reading.csv   # 别人的在读书单
+```
 
+- 不写用户 ID 时，统计和导出的是 `config --user` 指定的用户或当前登录账号。会自动复用本地登录态，所以“仅自己可见”的条目也会包含在内，分享文件前请检查。
+- 导出默认包含三种状态；`--wish`、`--doing`（图书是 `--reading`）只导出其中一种。格式按 `-o` 的扩展名选择 `.json`、`.csv` 或 `.md`，也可以用 `--format` 指定。
+- `-n` 是每种状态最多读取的条数（默认 1000，上限 3000）；读满时会提示还有更多。每页请求之间默认等 1 秒（`--delay`）。
+- 后续页面或状态读取失败时，会保留已经取得的数据，在 stderr 告警，JSON 里写入 `metadata.partial` 和 `metadata.warnings`。
+
+## 关注与退出
+
+```bash
 douban follow USER_ID
 douban unfollow USER_ID
 douban logout
 ```
-
-- `stats` 读取最近最多 1000 条“看过”记录（`--limit` 可调）；读满上限时会提示该年更早的记录没有统计到。
-- `stats`、`export`、`book export` 每页请求之间默认等待 1 秒（`--delay` 可调）。
-- `export --limit` 分别作用于看过、想看、在看三种状态，总条数最多约为 `3 × limit`。
-
-## 两种导出
-
-| 命令 | 数据 | 登录 | 格式 | 说明 |
-|---|---|---|---|---|
-| `douban book export <userId>` | 指定用户在当前登录状态下可见的想读/在读/读过 | 自动复用；无登录态则匿名读取 | Markdown、CSV、JSON | 必须指定 `--output`；未传 `--format` 时按扩展名推断；最多 5000 条；`--delay` 控制分页间隔 |
-| `douban export` | 当前账号的电影看过/想看/在看 | 需要 | CSV、JSON | 必须指定 `--output`；可能包含评分、短评和用户信息；`--delay` 控制分页和状态切换间隔 |
-
-登录后导出自己的书单可能包含匿名访问时不可见的条目，分享文件前请检查内容。
-
-两种导出在后续页面请求失败时都会保留已经取得的数据，并通过 stderr 明确告警。JSON 文件还会写入 `metadata.partial` 和 `metadata.warnings`；CSV/Markdown 会在完成提示中标明结果可能不完整。
 
 ## 批量操作
 
@@ -97,7 +97,7 @@ douban comment --file comments.tsv --delay 1.5
 
 文件格式：
 
-- `mark` / `unmark`：每行一个电影 ID。
+- `mark` / `unmark`：每行一个 ID；图书也可以是 ISBN。批量文件不接受名称。
 - `rate`：每行 `<id>,<score>`，`score` 为 1–5。
 - `comment`：每行 `<id>,<comment>`，逗号或制表符分隔。
 - 空行和以 `#` 开头的注释会被忽略。

@@ -1,7 +1,14 @@
 import type { UserCollectionItem } from '../api/collection.js';
+import type { SubjectKind } from '../api/subject.js';
 import { getDisplayWidth, padDisplayEnd, truncateDisplay } from './text.js';
 
 // Terminal presentation shared by every command. JSON output does not use it.
+
+/** Chinese names of Douban's statuses for movies and books. */
+export const STATUS_LABELS: Record<SubjectKind, Record<'wish' | 'do' | 'collect' | 'none', string>> = {
+  movie: { wish: '想看', do: '在看', collect: '看过', none: '未标记' },
+  book: { wish: '想读', do: '在读', collect: '读过', none: '未标记' }
+};
 
 export interface TableColumn<Row> {
   header: string;
@@ -9,6 +16,27 @@ export interface TableColumn<Row> {
   minWidth?: number;
   /** Longer values are cut with "…" so wide tables fit a terminal. */
   maxWidth?: number;
+  /** Page the cell links to in terminals that support links. */
+  link?: (row: Row) => string | undefined;
+}
+
+// Douban data is untrusted: only plain https URLs may go into an escape sequence.
+function isSafeUrl(url: string): boolean {
+  return /^https:\/\/\S+$/.test(url) && [...url].every((char) => char.charCodeAt(0) > 0x1f && char.charCodeAt(0) !== 0x7f);
+}
+
+/**
+ * A terminal hyperlink (OSC 8) when stdout is a terminal; plain text otherwise,
+ * so pipes, --json and agents never see escape codes.
+ */
+export function hyperlink(text: string, url: string | undefined): string {
+  if (!url || !isSafeUrl(url) || !process.stdout.isTTY || process.env.TERM === 'dumb') return text;
+  return `\u001b]8;;${url}\u0007${text}\u001b]8;;\u0007`;
+}
+
+/** The ID column of a list; the ID opens its Douban page in terminals that support links. */
+export function idColumn<Row extends { id: string; url?: string }>(): TableColumn<Row> {
+  return { header: 'ID', value: (row) => row.id, link: (row) => row.url };
 }
 
 export function renderTable<Row>(rows: Row[], columns: TableColumn<Row>[]): void {
@@ -22,9 +50,14 @@ export function renderTable<Row>(rows: Row[], columns: TableColumn<Row>[]): void
     column.minWidth ?? 0,
     ...cells.map((row) => getDisplayWidth(row[index]))
   ));
-  const line = (values: string[]) => values.map((value, index) => padDisplayEnd(value, widths[index])).join('   ').trimEnd();
+  // Widths come from the plain text; links wrap a cell only once it is padded.
+  const line = (values: string[], row?: Row) => values.map((value, index) => {
+    const url = row && columns[index].link?.(row);
+    const padding = ' '.repeat(Math.max(0, widths[index] - getDisplayWidth(value)));
+    return url ? hyperlink(value, url) + padding : padDisplayEnd(value, widths[index]);
+  }).join('   ').trimEnd();
   console.log(line(columns.map((column) => column.header)));
-  cells.forEach((row) => console.log(line(row)));
+  cells.forEach((cellRow, index) => console.log(line(cellRow, rows[index])));
 }
 
 /** 9,999 below ten thousand, 1.2万 above; '-' when unknown. */
@@ -66,7 +99,7 @@ export function printCollectionItems(items: UserCollectionItem[], offset = 0): v
     return;
   }
   items.forEach((item, index) => {
-    console.log(`${String(offset + index + 1).padStart(2)}. ${item.title}  ${formatStars(item.rating)}  ${item.date || '-'}  ID ${item.id}`);
+    console.log(`${String(offset + index + 1).padStart(2)}. ${item.title}  ${formatStars(item.rating)}  ${item.date || '-'}  ID ${hyperlink(item.id, item.url)}`);
     if (item.comment) console.log(`    “${item.comment}”`);
   });
 }

@@ -4,8 +4,10 @@ import { resolveCliStoragePaths } from './paths.js';
 import { ensurePrivateDirectory, migratePrivateFile, secureAtomicWriteFile } from './secure-file.js';
 
 export interface CliConfig {
-  /** Default user for `me` and `book me`. */
+  /** Default user for `me`, `book me`, `stats` and `export`. */
   user?: string;
+  /** Browser of the last successful browser login, used when `login` gets no --browser. */
+  login?: { browser: string; profile?: string };
 }
 
 function parseConfig(content: string): CliConfig {
@@ -13,17 +15,19 @@ function parseConfig(content: string): CliConfig {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('配置文件必须是 JSON 对象');
   }
-
-  const maybeUser = (parsed as Record<string, unknown>).user;
-  if (maybeUser !== undefined && typeof maybeUser !== 'string') {
+  const { user, login } = parsed as Record<string, unknown>;
+  if (user !== undefined && typeof user !== 'string') {
     throw new Error('配置项 user 必须是字符串');
   }
-  if (typeof maybeUser === 'string') {
-    const user = maybeUser.trim();
-    return user ? { user } : {};
-  }
 
-  return {};
+  const config: CliConfig = {};
+  if (typeof user === 'string' && user.trim()) config.user = user.trim();
+  // A remembered browser is only a convenience; a damaged entry is dropped.
+  if (login && typeof login === 'object' && typeof (login as Record<string, unknown>).browser === 'string') {
+    const { browser, profile } = login as Record<string, unknown>;
+    config.login = { browser: String(browser), ...(typeof profile === 'string' && profile ? { profile } : {}) };
+  }
+  return config;
 }
 
 export function readConfig(): CliConfig {

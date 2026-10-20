@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getCurrentUserProfile } from '../api/account.ts';
-import { getCollectionRecords, getUserCollectionPageWithSession } from '../api/collection.ts';
-import { getUserCollectionPage } from '../api/collection.ts';
+import { getUserCollectionPageWithSession } from '../api/collection.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -120,44 +119,15 @@ describe('authenticated account reads', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps authenticated collection cookies out of the public loader contract', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response(collectionHtml(), { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await getUserCollectionPage({
-      kind: 'movie',
-      userId: 'alice',
-      status: 'collect',
-      count: 1
-    });
-    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Cookie')).toBeNull();
-
-    fetchMock.mockClear();
-    await expect(getCollectionRecords('alice', 'collect', 1, 'dbcl2=secret')).resolves.toEqual({
-      records: [{
-        id: '42',
-        title: 'Example',
-        url: 'https://movie.douban.com/subject/42/',
-        status: 'collect',
-        date: '2026-08-10',
-        rating: 4,
-        comment: 'Great'
-      }],
-      partial: false,
-      warnings: []
-    });
-    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Cookie')).toBe('dbcl2=secret');
-  });
-
   it('reports partial collection warnings to the caller', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(
       collectionHtml().replace('1-1 / 1', '1-2 / 2'),
       { status: 200 }
     ));
     vi.stubGlobal('fetch', fetchMock);
-    const result = await getCollectionRecords('alice', 'collect', 2, 'dbcl2=secret');
+    const result = await getUserCollectionPageWithSession({ kind: 'movie', userId: 'alice', status: 'collect', count: 2 }, 'dbcl2=secret');
 
-    expect(result.records).toHaveLength(1);
+    expect(result.items).toHaveLength(1);
     expect(result.partial).toBe(true);
     expect(result.warnings).toEqual([
       expect.stringContaining('页面预计 2 条，实际解析 1 条')

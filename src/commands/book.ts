@@ -10,8 +10,6 @@ import {
   getBookReviews,
   getBookTop250,
   getLatestBooks,
-  parseIsbn,
-  resolveBookIdByIsbn,
   searchBooks,
   type BookItem
 } from '../api/book.js';
@@ -19,7 +17,6 @@ import { getOptionalSessionCookies } from '../auth/index.js';
 import { printWarnings, withErrorHandler } from '../utils/error.js';
 import {
   getPageRange,
-  isNumericId,
   pageToOffset,
   parseNonNegativeInt,
   parsePositiveInt,
@@ -30,6 +27,7 @@ import { withSpinner } from '../ui/spinner.js';
 import {
   compactNumber,
   formatTrend,
+  idColumn,
   printListHeading,
   printPosts,
   printRatingBars,
@@ -37,6 +35,7 @@ import {
   subjectLabel,
   type TableColumn
 } from '../ui/output.js';
+import { resolveSubject } from './resolve.js';
 
 function renderBookList(items: BookItem[], heading: string, offset = 0): void {
   console.log(`\n${heading}\n`);
@@ -54,36 +53,8 @@ function renderBookList(items: BookItem[], heading: string, offset = 0): void {
     { header: '评价', value: (item) => (item.rating_count > 0 ? compactNumber(item.rating_count) : '-') },
     ...trendColumn,
     { header: '作者 / 出版', value: (item) => item.meta, maxWidth: 30 },
-    { header: 'ID', value: (item) => item.id }
+    idColumn()
   ]);
-}
-
-async function resolveBook(input: string, outputJson: boolean): Promise<{ id: string; title?: string }> {
-  const query = input.trim();
-  if (!query) throw new Error('书籍 ID、ISBN 或关键词不能为空');
-
-  // Subject IDs are shorter than ISBNs, so check for an ISBN first.
-  const isbn = parseIsbn(query);
-  if (isbn) {
-    const id = await resolveBookIdByIsbn(isbn);
-    if (!outputJson) console.log(`\n🔎 ISBN ${isbn} 对应条目 ${id}`);
-    return { id };
-  }
-  if (isNumericId(query) && query.length < 10) return { id: query };
-
-  const warnings: string[] = [];
-  const cookies = await getOptionalSessionCookies();
-  const candidates = await searchBooks(query, 0, 10, { cookies, warnings });
-  printWarnings(warnings);
-  const normalizedQuery = query.toLocaleLowerCase();
-  const matched = candidates.find((item) => {
-    const title = item.title.toLocaleLowerCase();
-    const primaryTitle = title.split(/\s*[:：]\s*/)[0];
-    return title === normalizedQuery || primaryTitle === normalizedQuery;
-  }) || candidates[0];
-  if (!matched?.id) throw new Error(`未找到书籍：${query}`);
-  if (!outputJson) console.log(`\n🔎 已匹配为 ${subjectLabel(matched.id, matched.title)}`);
-  return { id: matched.id, title: matched.title };
 }
 
 function registerTop250Command(book: Command, name: 'hot' | 'top250'): void {
@@ -216,7 +187,7 @@ export function registerBookCommands(program: Command): Command {
       target: `书籍: ${String(args[0])}`,
       suggestion: '可尝试：douban book info 三体'
     }), async (query, opts) => {
-      const { id } = await resolveBook(query, Boolean(opts.json));
+      const { id } = await resolveSubject('book', query, Boolean(opts.json));
       const detail = await withSpinner(
         '正在获取书籍详情...',
         () => getBookInfo(id),
@@ -264,7 +235,7 @@ export function registerBookCommands(program: Command): Command {
       target: `书籍: ${String(args[0])}`,
       suggestion: '可尝试：douban book rating 三体'
     }), async (query, opts) => {
-      const { id } = await resolveBook(query, Boolean(opts.json));
+      const { id } = await resolveSubject('book', query, Boolean(opts.json));
       const stats = await withSpinner(
         '正在获取书籍评分分布...',
         () => getBookRatingStats(id),
@@ -294,7 +265,7 @@ export function registerBookCommands(program: Command): Command {
       target: `书籍: ${String(args[0])}`,
       suggestion: '可尝试：douban book comments 三体'
     }), async (query, opts) => {
-      const { id, title } = await resolveBook(query, Boolean(opts.json));
+      const { id, title } = await resolveSubject('book', query, Boolean(opts.json));
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const page = parsePositiveInt(opts.page, '--page', 1);
 
@@ -336,7 +307,7 @@ export function registerBookCommands(program: Command): Command {
       target: `书籍: ${String(args[0])}`,
       suggestion: '可尝试：douban book reviews 三体 -n 5'
     }), async (query, opts) => {
-      const { id, title } = await resolveBook(query, Boolean(opts.json));
+      const { id, title } = await resolveSubject('book', query, Boolean(opts.json));
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const page = parsePositiveInt(opts.page, '--page', 1);
 
@@ -374,7 +345,7 @@ export function registerBookCommands(program: Command): Command {
       target: `书籍: ${String(args[0])}`,
       suggestion: '可尝试：douban book notes 三体 -n 5'
     }), async (query, opts) => {
-      const { id, title } = await resolveBook(query, Boolean(opts.json));
+      const { id, title } = await resolveSubject('book', query, Boolean(opts.json));
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const page = parsePositiveInt(opts.page, '--page', 1);
 

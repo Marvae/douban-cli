@@ -52,7 +52,7 @@ douban book info 9787536692930         # 书名、ISBN 或 ID
 douban list 240962                     # 读取豆列
 
 douban login                           # 读取浏览器里已有的豆瓣登录
-douban export -o my-movies.json        # 备份自己的看过/想看/在看
+douban export -o my-movies.json        # 备份自己的看过/想看/在看（书单用 book export）
 douban book mark 2567698 --read --dry-run   # 先预览，确认后去掉 --dry-run
 ```
 
@@ -63,7 +63,7 @@ douban book mark 2567698 --read --dry-run   # 先预览，确认后去掉 --dry-
 | 电影与剧集 | `hot` `tv` `rank` `top250` `now` `coming` `weekly` `search` `movie` `rating` `comments` `reviews` |
 | 图书 | `book top250` `chart` `new` `search` `info` `rating` `comments` `reviews` `notes` |
 | 用户与豆列 | `me` `book me` `user` `book user` `list` `config` |
-| 账号与备份 | `login` `whoami` `logout` `record` `book record` `stats` `export` `book export` |
+| 账号与备份 | `login` `whoami` `logout` `record` `stats` `export`，图书加 `book` 前缀 |
 | 修改记录 | `mark` `rate` `comment` `unmark`，图书加 `book` 前缀；`review` `follow` `unfollow` |
 | 诊断 | `doctor` |
 

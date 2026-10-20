@@ -41,7 +41,7 @@ douban reviews 1291546 --limit 5
 
 ## 图书
 
-以下读取命令无需登录，详情类命令接受豆瓣 ID、ISBN 或书名。`book user` / `book export` 会自动复用本地登录态；匿名读取书单时结果可能较少或被拒绝。图书的标记、评分和短评见 [account.md](account.md)。
+以下读取命令无需登录，详情类命令接受豆瓣 ID、ISBN 或书名。`book user` / `book export` / `book stats` 会自动复用本地登录态；匿名读取书单时结果可能较少或被拒绝。图书的标记、评分和短评见 [account.md](account.md)。
 
 | 命令 | 能做什么 | 常用参数 |
 |---|---|---|
@@ -56,7 +56,8 @@ douban reviews 1291546 --limit 5
 | `douban book notes <query>` | 热门读书笔记 | `--page`、`--limit` |
 | `douban book me` | 我的想读/在读/读过书单（`config --user` 指定的用户或当前登录账号） | `--wish`、`--reading`、`--page`、`--limit` |
 | `douban book user <userId>` | 指定用户当前可见的想读/在读/读过书单 | `--wish`、`--reading`、`--page`、`--limit` |
-| `douban book export <userId>` | 将当前可见的书单导出到文件 | `--wish`、`--reading`、`--limit`、`--output`、`--format`、`--delay` |
+| `douban book stats` | 某一年的读书统计 | `--year`、`--limit` |
+| `douban book export [userId]` | 导出书单（默认自己的读过/想读/在读） | `-o`、`--wish`、`--reading`、`--format`、`--limit` |
 
 `book chart` 和 `book new` 支持：全部、文学、小说、历史文化、社会纪实、科学新知、艺术设计、商业经管、绘本漫画。
 
@@ -78,8 +79,8 @@ douban book notes 三体 --limit 5
 # 书单（自动复用本地登录态）
 douban book user USER_ID --wish --page 2
 douban book user USER_ID --reading
-douban book export USER_ID --wish --limit 100 --delay 2 -o books.md
-douban book export USER_ID --reading -f csv -o reading.csv
+douban book export -o my-books.md
+douban book export USER_ID --reading -o reading.csv
 ```
 
 图书详情包括作者、译者、出版社、出版年、页数、定价、ISBN、丛书、标签、简介、作者简介、目录，以及“喜欢读这本书的人也喜欢”（`recommendations`）。某个数据来源失败时，保留其余来源的结果。

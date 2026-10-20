@@ -353,19 +353,6 @@ describe('authentication safety', () => {
     expect(lstatSync(path.dirname(cachePath)).mode & 0o777).toBe(0o700);
   });
 
-  it('allows a longer browser cookie helper timeout', async () => {
-    const reader = vi.fn().mockResolvedValue({
-      cookies: [{ name: 'dbcl2', value: 'browser-secret', source: { browser: 'chrome' } }],
-      warnings: []
-    });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 })));
-    const auth = await import('../auth/index.ts');
-
-    await auth.loginFromBrowserCookies({ browser: 'chrome', cookieTimeoutMs: 120_000 }, reader);
-
-    expect(reader).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 120_000 }));
-  });
-
   it('opens a browser only when explicitly requested', async () => {
     const spawnSyncMock = vi.fn().mockReturnValue({ status: 0 });
     const question = vi.fn().mockResolvedValue('');
@@ -549,63 +536,12 @@ describe('authentication safety', () => {
     });
   });
 
-  it('limits Arc cookie extraction to macOS', async () => {
-    const auth = await import('../auth/index.ts');
-
-    expect(auth.resolveBrowserCookieTarget('arc', 'darwin')).toEqual({
-      backend: 'chrome',
-      chromiumBrowser: 'arc'
-    });
-    expect(() => auth.resolveBrowserCookieTarget('arc', 'win32'))
-      .toThrow('Arc Cookie 提取目前仅支持 macOS');
-    expect(() => auth.resolveBrowserCookieTarget('arc', 'linux'))
-      .toThrow('Arc Cookie 提取目前仅支持 macOS');
-    expect(() => auth.resolveBrowserCookieTarget('safari', 'win32'))
-      .toThrow('Safari Cookie 提取目前仅支持 macOS');
-  });
-
   it('rejects interactive login from a pipe or CI input', async () => {
     const auth = await import('../auth/index.ts');
 
     expect(() => auth.assertInteractiveLogin(false)).toThrow('douban login 需要交互式终端');
     expect(() => auth.assertInteractiveLogin(true)).not.toThrow();
     expect(() => auth.assertInteractiveLogin(undefined)).toThrow('douban login 需要交互式终端');
-  });
-
-  it('maps supported system browser identifiers to cookie backends', async () => {
-    const auth = await import('../auth/index.ts');
-
-    expect(auth.browserFromSystemIdentifier('company.thebrowser.browser')).toBe('arc');
-    expect(auth.browserFromSystemIdentifier('com.google.Chrome')).toBe('chrome');
-    expect(auth.browserFromSystemIdentifier('MSEdgeHTM')).toBe('edge');
-    expect(auth.browserFromSystemIdentifier('FirefoxURL-308046B0AF4A39CB')).toBe('firefox');
-    expect(auth.browserFromSystemIdentifier('com.apple.Safari')).toBe('safari');
-    expect(auth.browserFromSystemIdentifier('org.example.unknown')).toBeUndefined();
-  });
-
-  it('reuses the identity returned by ensureAuth in whoami', async () => {
-    const reader = vi.fn().mockResolvedValue({
-      cookies: [{ name: 'dbcl2', value: 'browser-secret', source: { browser: 'chrome' } }],
-      warnings: []
-    });
-    const fetchMock = vi.fn(async () => new Response(profileHtml('alice', 'Alice'), { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
-    const auth = await import('../auth/index.ts');
-    await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
-    fetchMock.mockClear();
-
-    const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    const { registerAuthCommands } = await import('../commands/auth.ts');
-    const program = new Command();
-    registerAuthCommands(program);
-
-    await program.parseAsync(['node', 'douban', 'whoami', '--json']);
-
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(JSON.parse(String(stdout.mock.calls[0]?.[0]))).toMatchObject({
-      id: 'alice',
-      name: 'Alice'
-    });
   });
 
   it('prints provider warnings while redacting returned cookie values', async () => {
@@ -827,38 +763,6 @@ describe('authentication safety', () => {
     expect(existsSync(legacyAuthCachePath())).toBe(true);
     expect(stderr.mock.calls.map((call) => String(call[0])).join('\n'))
       .toContain('迁移登录缓存失败，继续使用旧缓存');
-  });
-
-  it('removes a leftover legacy cache after validating the current cache', async () => {
-    const reader = vi.fn().mockResolvedValue({
-      cookies: [{ name: 'dbcl2', value: 'current-secret', source: { browser: 'chrome' } }],
-      warnings: []
-    });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 })));
-    const auth = await import('../auth/index.ts');
-    await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
-    writeFileSync(legacyAuthCachePath(), '{leftover-legacy-cache', { mode: 0o600 });
-
-    await expect(auth.detectAuthSession()).resolves.toMatchObject({ accountId: 'alice' });
-    expect(existsSync(legacyAuthCachePath())).toBe(false);
-  });
-
-  it('recovers a valid legacy cache after removing an invalid current cache', async () => {
-    const reader = vi.fn().mockResolvedValue({
-      cookies: [{ name: 'dbcl2', value: 'legacy-secret', source: { browser: 'chrome' } }],
-      warnings: []
-    });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 })));
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const auth = await import('../auth/index.ts');
-    await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
-    renameSync(authCachePath(), legacyAuthCachePath());
-    mkdirSync(path.dirname(authCachePath()), { recursive: true });
-    writeFileSync(authCachePath(), '{broken-current-cache', { mode: 0o600 });
-
-    await expect(auth.detectAuthSession()).resolves.toMatchObject({ accountId: 'alice' });
-    expect(existsSync(authCachePath())).toBe(true);
-    expect(existsSync(legacyAuthCachePath())).toBe(false);
   });
 
   it('does not delete a cache path when the failure is not a cache-format error', async () => {

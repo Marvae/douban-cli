@@ -7,7 +7,7 @@ export function registerConfigCommand(program: Command): void {
   program
     .command('config')
     .helpGroup('用户与豆列:')
-    .description('设置 me 和 book me 默认查看的用户')
+    .description('默认用户（me、book me、stats、export 默认查看的用户）')
     .option('--user <id>', '默认用户 ID（个人主页地址 /people/<id>/ 中的部分）')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler({
@@ -27,6 +27,9 @@ export function registerConfigCommand(program: Command): void {
         console.log(JSON.stringify(current, null, 2));
       } else {
         console.log(`\n⚙️  配置文件: ${resolveCliStoragePaths().configPath}`);
+        if (current.login) {
+          console.log(`登录浏览器: ${current.login.browser}${current.login.profile ? ` (${current.login.profile})` : ''}`);
+        }
         if (current.user) {
           console.log(`默认用户 ID: ${current.user}`);
           console.log('可直接运行: douban me');

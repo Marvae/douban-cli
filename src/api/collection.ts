@@ -1,5 +1,4 @@
 import { BOOK_BASE, BASE, cleanText, fetchHtml, HttpRequestError, ResponseSchemaError, STALE_SESSION_WARNING } from './common.js';
-import { debug } from '../utils/debug.js';
 import { sleep } from '../utils/timing.js';
 
 export type CollectionKind = 'movie' | 'book';
@@ -44,7 +43,8 @@ interface ParsedCollectionPage {
 }
 
 const UPSTREAM_COLLECTION_PAGE_SIZE = 15;
-const MAX_COLLECTION_COUNT = 5000;
+// 200 upstream pages of 15: the most one read may request.
+const MAX_COLLECTION_COUNT = 3000;
 
 function normalizeRatingClass(block: string): number {
   const match = block.match(/rating(\d)-t/);
@@ -306,7 +306,7 @@ async function loadUserCollectionPage(
   let cursor = start;
   let nextStart: number | null = start;
   let partial = false;
-  const maxRequests = Math.min(200, Math.ceil(count / UPSTREAM_COLLECTION_PAGE_SIZE) + 2);
+  const maxRequests = Math.ceil(count / UPSTREAM_COLLECTION_PAGE_SIZE) + 2;
 
   for (let requestNumber = 0; requestNumber < maxRequests && results.length < count && nextStart !== null; requestNumber += 1) {
     if (requestNumber > 0 && pageDelayMs > 0) {
@@ -418,67 +418,4 @@ export async function getUserCollectionPageWithSession(
     const page = await getUserCollectionPage(options);
     return { ...page, warnings: [STALE_SESSION_WARNING, ...page.warnings] };
   }
-}
-
-export interface CollectionRecord {
-  id: string;
-  title: string;
-  url: string;
-  status: CollectionStatus;
-  date?: string;
-  rating?: number;
-  comment?: string;
-}
-
-export interface CollectionRecordLoadOptions {
-  pageDelayMs?: number;
-  onProgress?: (fetched: number) => void;
-}
-
-export interface CollectionRecordResult {
-  records: CollectionRecord[];
-  partial: boolean;
-  warnings: string[];
-}
-
-export async function getCollectionRecords(
-  userId: string,
-  status: CollectionStatus,
-  limit: number,
-  cookies: string,
-  options: CollectionRecordLoadOptions = {}
-): Promise<CollectionRecordResult> {
-  const id = userId.trim();
-  if (!id) throw new Error('用户 ID 不能为空');
-  if (!Number.isInteger(limit) || limit <= 0) {
-    return { records: [], partial: false, warnings: [] };
-  }
-
-  const page = await loadAuthenticatedUserCollectionPage({
-    kind: 'movie',
-    userId: id,
-    status,
-    start: 0,
-    count: limit,
-    pageDelayMs: options.pageDelayMs,
-    onProgress: options.onProgress
-  }, cookies);
-  const { warnings } = page;
-  if (warnings.length > 0) {
-    debug('account', `用户收藏仅返回部分结果: ${warnings.join('; ')}`);
-  }
-
-  return {
-    records: page.items.map((item) => ({
-      id: item.id,
-      title: item.title,
-      url: item.url,
-      status,
-      date: item.date || undefined,
-      rating: item.rating > 0 ? item.rating : undefined,
-      comment: item.comment || undefined
-    })),
-    partial: page.partial,
-    warnings
-  };
 }

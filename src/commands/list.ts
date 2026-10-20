@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { getDoulist, getHotLists } from '../api/list.js';
 import { printWarnings, withErrorHandler } from '../utils/error.js';
 import { parseNonNegativeInt, parsePositiveIntAtMost } from '../utils/parsing.js';
-import { renderTable } from '../ui/output.js';
+import { idColumn, renderTable } from '../ui/output.js';
 import { withSpinner } from '../ui/spinner.js';
 import { truncateDisplay } from '../ui/text.js';
 
@@ -37,7 +37,7 @@ export function registerListCommands(program: Command): void {
           { header: '作者', value: (item) => item.author, maxWidth: 12 },
           { header: '关注', value: (item) => item.followers },
           { header: '最近更新', value: (item) => item.recent, maxWidth: 20 },
-          { header: 'ID', value: (item) => item.id }
+          idColumn()
         ]);
         return;
       }

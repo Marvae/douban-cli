@@ -2,91 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { resolveCliStoragePaths } from '../storage/paths.ts';
 
 describe('CLI storage paths', () => {
-  it('uses one absolute DOUBAN_CLI_HOME override on every platform', () => {
-    const paths = resolveCliStoragePaths({
-      platform: 'linux',
-      homedir: '/home/alice',
-      env: { DOUBAN_CLI_HOME: '/var/lib/alice/douban' }
-    });
-
-    expect(paths.authCachePath).toBe('/var/lib/alice/douban/auth.json');
-    expect(paths.configPath).toBe('/var/lib/alice/douban/config.json');
+  it.each([
+    ['DOUBAN_CLI_HOME on any platform', 'linux', '/home/alice', { DOUBAN_CLI_HOME: '/var/lib/douban' }, '/var/lib/douban/auth.json', '/var/lib/douban/config.json'],
+    ['Application Support on macOS', 'darwin', '/Users/alice', {}, '/Users/alice/Library/Application Support/douban-cli/auth.json', '/Users/alice/Library/Application Support/douban-cli/config.json'],
+    ['absolute XDG directories on Linux', 'linux', '/home/alice', { XDG_STATE_HOME: '/data/state', XDG_CONFIG_HOME: '/data/config' }, '/data/state/douban-cli/auth.json', '/data/config/douban-cli/config.json'],
+    ['standard Linux fallbacks for relative XDG values', 'linux', '/home/alice', { XDG_STATE_HOME: 'state', XDG_CONFIG_HOME: 'config' }, '/home/alice/.local/state/douban-cli/auth.json', '/home/alice/.config/douban-cli/config.json'],
+    ['local state and roaming config on Windows', 'win32', 'C:\\Users\\alice', { LOCALAPPDATA: 'D:\\Local', APPDATA: 'D:\\Roaming' }, 'D:\\Local\\douban-cli\\auth.json', 'D:\\Roaming\\douban-cli\\config.json']
+  ] as const)('uses %s', (_name, platform, homedir, env, authCachePath, configPath) => {
+    expect(resolveCliStoragePaths({ platform, homedir, env })).toMatchObject({ authCachePath, configPath });
   });
 
-  it('rejects a relative DOUBAN_CLI_HOME override', () => {
-    expect(() => resolveCliStoragePaths({
-      platform: 'linux',
-      homedir: '/home/alice',
-      env: { DOUBAN_CLI_HOME: './douban-data' }
-    })).toThrow('DOUBAN_CLI_HOME 必须是绝对路径');
-  });
-
-  it('rejects a filesystem root as DOUBAN_CLI_HOME', () => {
-    expect(() => resolveCliStoragePaths({
-      platform: 'linux',
-      homedir: '/home/alice',
-      env: { DOUBAN_CLI_HOME: '/' }
-    })).toThrow('不能指向文件系统根目录');
-  });
-
-  it('rejects an invalid home directory before constructing legacy paths', () => {
-    expect(() => resolveCliStoragePaths({
-      platform: 'linux',
-      homedir: 'home/alice',
-      env: {}
-    })).toThrow('用户主目录必须是绝对路径');
-  });
-
-  it('uses Application Support on macOS', () => {
-    const paths = resolveCliStoragePaths({
-      platform: 'darwin',
-      homedir: '/Users/alice',
-      env: {}
-    });
-
-    expect(paths.authCachePath).toBe('/Users/alice/Library/Application Support/douban-cli/auth.json');
-    expect(paths.configPath).toBe('/Users/alice/Library/Application Support/douban-cli/config.json');
-  });
-
-  it('uses absolute XDG directories on Linux', () => {
-    const paths = resolveCliStoragePaths({
-      platform: 'linux',
-      homedir: '/home/alice',
-      env: {
-        XDG_STATE_HOME: '/data/alice/state',
-        XDG_CONFIG_HOME: '/data/alice/config'
-      }
-    });
-
-    expect(paths.authCachePath).toBe('/data/alice/state/douban-cli/auth.json');
-    expect(paths.configPath).toBe('/data/alice/config/douban-cli/config.json');
-  });
-
-  it('ignores relative XDG values and uses standard Linux fallbacks', () => {
-    const paths = resolveCliStoragePaths({
-      platform: 'linux',
-      homedir: '/home/alice',
-      env: {
-        XDG_STATE_HOME: 'state',
-        XDG_CONFIG_HOME: 'config'
-      }
-    });
-
-    expect(paths.authCachePath).toBe('/home/alice/.local/state/douban-cli/auth.json');
-    expect(paths.configPath).toBe('/home/alice/.config/douban-cli/config.json');
-  });
-
-  it('separates local auth state from roaming config on Windows', () => {
-    const paths = resolveCliStoragePaths({
-      platform: 'win32',
-      homedir: 'C:\\Users\\alice',
-      env: {
-        LOCALAPPDATA: 'D:\\Local',
-        APPDATA: 'D:\\Roaming'
-      }
-    });
-
-    expect(paths.authCachePath).toBe('D:\\Local\\douban-cli\\auth.json');
-    expect(paths.configPath).toBe('D:\\Roaming\\douban-cli\\config.json');
+  it.each([
+    [{ DOUBAN_CLI_HOME: './douban-data' }, '/home/alice', 'DOUBAN_CLI_HOME 必须是绝对路径'],
+    [{ DOUBAN_CLI_HOME: '/' }, '/home/alice', '不能指向文件系统根目录'],
+    [{}, 'home/alice', '用户主目录必须是绝对路径']
+  ])('rejects unsafe locations: %j %s', (env, homedir, message) => {
+    expect(() => resolveCliStoragePaths({ platform: 'linux', homedir, env })).toThrow(message);
   });
 });
