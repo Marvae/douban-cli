@@ -60,7 +60,7 @@
     "eslint": "^10.8.1",
     "globals": "^17.9.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+    "vitest": "^5.0.5"
   },
   "files": [
     "dist",
