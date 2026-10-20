@@ -19,6 +19,7 @@ export type CliErrorCode =
   | 'INVALID_ARGUMENT'
   | 'NETWORK_ERROR'
   | 'NOT_FOUND'
+  | 'RATE_LIMITED'
   | 'UNKNOWN_COMMAND';
 
 export type CliErrorPayload = {
@@ -97,9 +98,11 @@ function structuredErrorCode(error: unknown): CliErrorCode | undefined {
     if (structuredCode === 'NETWORK') return 'NETWORK_ERROR';
     if (structuredCode === 'INVALID_ARGUMENT') return 'INVALID_ARGUMENT';
     if (structuredCode === 'AUTH_REQUIRED') return 'AUTH_REQUIRED';
+    if (structuredCode === 'RATE_LIMITED') return 'RATE_LIMITED';
     if (structuredCode === 'HTTP_STATUS') {
       if (structuredStatus === 401) return 'AUTH_REQUIRED';
       if (structuredStatus === 404) return 'NOT_FOUND';
+      if (structuredStatus === 429) return 'RATE_LIMITED';
       return 'HTTP_ERROR';
     }
     if (['CHALLENGE', 'CONTENT_TYPE', 'INVALID_JSON', 'REDIRECT', 'SCHEMA_MISMATCH'].includes(structuredCode)) {
@@ -167,7 +170,7 @@ function classifyError(error: unknown, message: string): CliErrorCode {
   return 'COMMAND_FAILED';
 }
 
-export function isJsonOutputRequested(argv: readonly string[] = process.argv.slice(2)): boolean {
+function isJsonOutputRequested(argv: readonly string[] = process.argv.slice(2)): boolean {
   return argv.includes('--json');
 }
 
@@ -179,6 +182,8 @@ function createErrorPayload(error: unknown, ctx: CommandErrorContext): CliErrorP
   if (error instanceof Error && 'code' in error) {
     if (error.code === 'CHALLENGE') {
       recovery = '豆瓣要求安全验证，请暂停请求；可在浏览器中完成验证后再试，避免连续重试。';
+    } else if (error.code === 'RATE_LIMITED') {
+      recovery = '豆瓣暂时限制了请求。未登录搜索最容易被限制：运行 douban login 后 CLI 会自动复用登录态；或稍后再试，避免连续重试。';
     } else if (error.code === 'HTTP_STATUS' && 'status' in error && error.status === 429) {
       recovery = '请求已被限流，请按服务端 Retry-After 指定的时间等待，避免连续重试。';
     }
@@ -209,6 +214,11 @@ function printCliError(error: unknown, ctx: CommandErrorContext): void {
     console.error(`   可选项：${redactSensitiveArguments(ctx.options)}`);
   }
   console.error(`   提示：${payload.error.suggestion || '运行 douban --help 查看完整用法'}`);
+}
+
+/** Report degraded or partial results on stderr so stdout JSON stays parseable. */
+export function printWarnings(warnings: readonly string[]): void {
+  for (const warning of warnings) console.error(`⚠️ ${warning}`);
 }
 
 export function withErrorHandler<T extends unknown[]>(

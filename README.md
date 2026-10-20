@@ -83,11 +83,11 @@ npx @marvae24/douban-cli hot
 | `douban top250` | 豆瓣电影 Top250，每页 25 条 | `--page`，支持交互翻页 |
 | `douban coming` | 即将上映 | `--limit` |
 | `douban weekly` | 一周口碑榜与排名趋势 | `--limit` |
-| `douban search <keyword>` | 搜索电影 | `--start`、`--limit` |
+| `douban search <keyword>` | 搜索电影（自动复用本地登录态，见下文） | `--start`、`--limit` |
 | `douban movie <id-or-title>` | 电影/剧集详情，可直接传 ID 或片名 | `--json` |
-| `douban rating <id>` | 评分分布、想看/看过统计和类型排名 | 只接受数字 ID |
-| `douban comments <id>` | 热门短评 | `--page`、`--limit` |
-| `douban reviews <id>` | 热门影评 | `--page`、`--limit` |
+| `douban rating <id-or-title>` | 评分分布、想看/看过统计和类型排名 | ID 或片名 |
+| `douban comments <id-or-title>` | 热门短评 | `--page`、`--limit` |
+| `douban reviews <id-or-title>` | 热门影评 | `--page`、`--limit` |
 
 类型排行支持：剧情、喜剧、动作、爱情、科幻、动画、悬疑、惊悚、恐怖、纪录片、短片、情色、同性、音乐、歌舞、家庭、儿童、传记、历史、战争、犯罪、西部、奇幻、冒险、灾难、武侠、古装、运动、黑色电影。
 
@@ -98,9 +98,12 @@ douban search "奥本海默" --start 20 --limit 20
 douban movie 35593344
 douban movie "沙丘"
 douban rating 1291546
+douban rating 沙丘
 douban comments 1291546
 douban reviews 1291546 --limit 5
 ```
+
+豆瓣对未登录的搜索限流很严。电影/图书搜索，以及用片名、书名解析条目时，CLI 会自动复用已有的本地登录态（与用户收藏相同）；没有登录态时按匿名请求，被限流会返回 `RATE_LIMITED` 并提示运行 `douban login`，不会把限流伪装成"没有结果"。完整搜索不可用而退回联想结果时，会在 stderr 给出提示。图书 ISBN 通过豆瓣的 ISBN 直达地址解析，不依赖搜索。
 
 电影详情会尽量展示中文名/原名、年份、评分、评分人数、导演、编剧、主演、类型、制片国家/地区、语言、片长、上映日期、别名、IMDb、集数、简介和评分分布。上游部分来源不可用时，CLI 会合并仍然可用的数据。
 
@@ -281,7 +284,8 @@ douban user USER_ID --wish --json
 douban whoami --json
 ```
 
-- `--json` 将命令结果写到 stdout；失败时向 stderr 写结构化 JSON，并返回非零退出码。
+- `--json` 将命令结果写到 stdout；失败时向 stderr 写结构化 JSON，并返回非零退出码。错误码包括 `INVALID_ARGUMENT`、`NOT_FOUND`、`AUTH_REQUIRED`、`RATE_LIMITED`、`HTTP_ERROR`、`NETWORK_ERROR` 等。
+- 结果可能不完整时，提示写到 stderr（以 `⚠️` 开头），stdout 的 JSON 保持可解析。
 - `export --format json` 与 `book export --format json` 是文件格式选项，不会把 JSON 打到 stdout。
 - 需要稳定脚本行为时，以具体命令的 `--help` 和 JSON 字段为准，不要解析人类可读表格。
 
@@ -324,7 +328,7 @@ douban book comments --help
 DOUBAN_DEBUG=1 douban book info 三体
 ```
 
-豆瓣页面可能出现限流、验证码或结构变化。CLI 会对只读 GET 请求进行有限重试，并尽量返回已经取得的 partial results；如果页面结构无法可靠识别，会明确报错而不是把解析失败伪装成空列表。 遇到安全验证请暂停请求；服务端的 `Retry-After` 超出自动等待上限时，CLI 会停止自动重试，不会缩短服务端要求的等待时间。
+豆瓣页面可能出现限流、验证码或结构变化。CLI 会对只读 GET 请求进行有限重试，并尽量返回已经取得的 partial results；如果页面结构无法可靠识别，会明确报错而不是把解析失败伪装成空列表。遇到安全验证请暂停请求；服务端的 `Retry-After` 超出自动等待上限时，CLI 会停止自动重试，不会缩短服务端要求的等待时间。
 
 ## 🧪 开发
 

@@ -11,10 +11,13 @@ import {
   getBookReviews,
   getBookTop250,
   getLatestBooks,
+  parseIsbn,
+  resolveBookIdByIsbn,
   searchBooks,
   type BookItem
 } from '../api/book.js';
-import { withErrorHandler } from '../utils/error.js';
+import { getOptionalSessionCookies } from '../auth.js';
+import { printWarnings, withErrorHandler } from '../utils/error.js';
 import {
   getPageRange,
   isNumericId,
@@ -65,11 +68,19 @@ async function resolveBookId(input: string, outputJson: boolean): Promise<string
   const query = input.trim();
   if (!query) throw new Error('书籍 ID、ISBN 或关键词不能为空');
 
-  // Douban subject IDs are shorter than ISBN-10/ISBN-13. Long numeric input
-  // should be searched as ISBN instead of being sent as a subject ID.
+  // Subject IDs are shorter than ISBNs, so check for an ISBN first.
+  const isbn = parseIsbn(query);
+  if (isbn) {
+    const id = await resolveBookIdByIsbn(isbn);
+    if (!outputJson) console.log(`\n🔎 ISBN ${isbn} 对应条目 ${id}`);
+    return id;
+  }
   if (isNumericId(query) && query.length < 10) return query;
 
-  const candidates = await searchBooks(query, 0, 10);
+  const warnings: string[] = [];
+  const cookies = await getOptionalSessionCookies();
+  const candidates = await searchBooks(query, 0, 10, { cookies, warnings });
+  printWarnings(warnings);
   const normalizedQuery = query.toLocaleLowerCase();
   const matched = candidates.find((item) => {
     const title = item.title.toLocaleLowerCase();
@@ -177,11 +188,14 @@ export function registerBookCommands(program: Command): Command {
     }), async (keyword, opts) => {
       const start = parseNonNegativeInt(opts.start, '--start', 0);
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
+      const warnings: string[] = [];
+      const cookies = await getOptionalSessionCookies();
       const items = await withSpinner(
         `正在搜索书籍“${keyword}”...`,
-        () => searchBooks(keyword, start, limit),
+        () => searchBooks(keyword, start, limit, { cookies, warnings }),
         !opts.json
       );
+      printWarnings(warnings);
 
       if (opts.json) console.log(JSON.stringify(items, null, 2));
       else renderBookList(items, `🔍 搜索书籍 · ${keyword}`, start);

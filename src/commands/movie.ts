@@ -12,7 +12,8 @@ import {
   getWeekly
 } from '../api/movie.js';
 import { searchMovies } from '../api/search.js';
-import { withErrorHandler } from '../utils/error.js';
+import { getOptionalSessionCookies } from '../auth.js';
+import { printWarnings, withErrorHandler } from '../utils/error.js';
 import {
   getPageRange,
   isNumericId,
@@ -162,6 +163,22 @@ function normalizeMovieIdInput(value: string, fieldName = '电影 ID'): string {
     throw new Error(`${fieldName} 必须是纯数字: ${value}`);
   }
   return id;
+}
+
+/** Accept a numeric subject ID or a title; titles are resolved through search with the local session. */
+async function resolveMovieId(input: string, outputJson: boolean): Promise<string> {
+  const query = input.trim();
+  if (!query) throw new Error('电影 ID 或片名不能为空');
+  if (isNumericId(query)) return query;
+
+  const warnings: string[] = [];
+  const cookies = await getOptionalSessionCookies();
+  const [matched] = await searchMovies(query, 0, 1, { cookies, warnings });
+  printWarnings(warnings);
+  if (!matched?.id) throw new Error(`未找到电影：${query}`);
+  const movieId = normalizeMovieIdInput(matched.id, '匹配到的电影 ID');
+  if (!outputJson) console.log(`\n🔎 已匹配为: ${matched.title} (${movieId})`);
+  return movieId;
 }
 
 export function registerMovieCommands(program: Command): void {
@@ -348,11 +365,14 @@ export function registerMovieCommands(program: Command): void {
     }), async (keyword, opts) => {
       const start = parseNonNegativeInt(opts.start, '--start', 0);
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
+      const warnings: string[] = [];
+      const cookies = await getOptionalSessionCookies();
       const items = await withSpinner(
         `正在搜索“${keyword}”...`,
-        () => searchMovies(keyword, start, limit),
+        () => searchMovies(keyword, start, limit, { cookies, warnings }),
         !opts.json
       );
+      printWarnings(warnings);
 
       if (opts.json) {
         console.log(JSON.stringify(items, null, 2));
@@ -374,7 +394,7 @@ export function registerMovieCommands(program: Command): void {
     }));
 
   program
-    .command('movie <id>')
+    .command('movie <id-or-title>')
     .helpGroup('电影:')
     .description('按电影 ID 或片名获取详情')
     .option('--json', '以 JSON 输出')
@@ -383,18 +403,7 @@ export function registerMovieCommands(program: Command): void {
       target: `ID: ${String(args[0] || '未指定')}`,
       suggestion: '确认 ID 是否正确，可使用 douban search 搜索'
     }), async (id, opts) => {
-      let movieId = id.trim();
-      if (!isNumericId(movieId)) {
-        const result = await searchMovies(movieId, 0, 1);
-        const matched = result[0];
-        if (!matched?.id) {
-          throw new Error(`未找到电影：${movieId}`);
-        }
-        movieId = normalizeMovieIdInput(matched.id, '匹配到的电影 ID');
-        if (!opts.json) {
-          console.log(`\n🔎 已匹配为: ${matched.title} (${movieId})`);
-        }
-      }
+      const movieId = await resolveMovieId(id, Boolean(opts.json));
 
       const detail = await withSpinner(
         '正在获取电影详情...',
@@ -430,16 +439,16 @@ export function registerMovieCommands(program: Command): void {
     }));
 
   program
-    .command('rating <id>')
+    .command('rating <id-or-title>')
     .helpGroup('电影:')
-    .description('获取电影评分分布')
+    .description('按电影 ID 或片名获取评分分布')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
       command: 'rating',
       target: `ID: ${String(args[0] || '未指定')}`,
       suggestion: '可尝试：douban rating 1292052'
     }), async (id, opts) => {
-      const movieId = normalizeMovieIdInput(id);
+      const movieId = await resolveMovieId(id, Boolean(opts.json));
       const stats = await withSpinner(
         '正在获取评分分布...',
         () => getRatingStats(movieId),
@@ -541,9 +550,9 @@ export function registerMovieCommands(program: Command): void {
     }));
 
   program
-    .command('reviews <movieId>')
+    .command('reviews <id-or-title>')
     .helpGroup('电影:')
-    .description('按电影 ID 获取热门影评')
+    .description('按电影 ID 或片名获取热门影评')
     .option('-p, --page <n>', '页码（从 1 开始）', '1')
     .option('-n, --limit <n>', '返回数量', '20')
     .option('--json', '以 JSON 输出')
@@ -552,7 +561,7 @@ export function registerMovieCommands(program: Command): void {
       target: `ID: ${String(args[0] || '未指定')}`,
       suggestion: '可尝试：douban reviews 1292052 --page 2'
     }), async (movieId, opts) => {
-      const id = normalizeMovieIdInput(movieId);
+      const id = await resolveMovieId(movieId, Boolean(opts.json));
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const page = parsePositiveInt(opts.page, '--page', 1);
 
@@ -613,9 +622,9 @@ export function registerMovieCommands(program: Command): void {
     }));
 
   program
-    .command('comments <movieId>')
+    .command('comments <id-or-title>')
     .helpGroup('电影:')
-    .description('按电影 ID 获取热门短评')
+    .description('按电影 ID 或片名获取热门短评')
     .option('-p, --page <n>', '页码（从 1 开始）', '1')
     .option('-n, --limit <n>', '返回数量', '20')
     .option('--json', '以 JSON 输出')
@@ -624,7 +633,7 @@ export function registerMovieCommands(program: Command): void {
       target: `ID: ${String(args[0] || '未指定')}`,
       suggestion: '可尝试：douban comments 1292052'
     }), async (movieId, opts) => {
-      const id = normalizeMovieIdInput(movieId);
+      const id = await resolveMovieId(movieId, Boolean(opts.json));
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const page = parsePositiveInt(opts.page, '--page', 1);
 

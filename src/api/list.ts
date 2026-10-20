@@ -1,4 +1,4 @@
-import { cleanText, extractNumericId, fetchHtml, isChallengePage, ResponseSchemaError } from './common.js';
+import { cleanText, extractNumericId, fetchHtml, ResponseSchemaError } from './common.js';
 
 export interface DoulistItem {
   id: string;
@@ -18,10 +18,6 @@ export async function getHotLists(limit = 20): Promise<DoulistItem[]> {
   const html = await fetchHtml('https://www.douban.com/doulist/', {
     Referer: 'https://www.douban.com/'
   });
-
-  if (isChallengePage(html)) {
-    throw new Error('豆列页面触发了反爬挑战，暂时无法解析');
-  }
 
   const results: DoulistItem[] = [];
   const itemRegex = /<li[^>]*class=["'][^"']*\bdoulist-item\b[^"']*["'][^>]*>[\s\S]*?<\/li>/gi;

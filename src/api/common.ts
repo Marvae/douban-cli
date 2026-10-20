@@ -1,17 +1,41 @@
-import { HttpClient, isChallengeHtml, isLoginHtml, type HtmlPage } from './http/client.js';
+import { HttpClient, type HtmlPage } from './http/client.js';
+import { HttpRequestError, ResponseSchemaError } from './http/errors.js';
 
 export { HttpClient, type HtmlPage } from './http/client.js';
 export { HttpRequestError, ResponseSchemaError } from './http/errors.js';
 
-export const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
+export const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 export const BASE = 'https://movie.douban.com';
 export const BOOK_BASE = 'https://book.douban.com';
 export const FETCH_TIMEOUT_MS = 30000;
 
 const httpClient = new HttpClient({
-  defaultHeaders: { 'User-Agent': UA },
+  defaultHeaders: { 'User-Agent': UA, 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8' },
   timeoutMs: FETCH_TIMEOUT_MS
 });
+
+/** Options for reads that work anonymously but are throttled far less with a session. */
+export interface SessionReadOptions {
+  /** Cookie header of an explicitly supplied local session. */
+  cookies?: string;
+  /** Receives human-readable notes about degraded or partial results. */
+  warnings?: string[];
+}
+
+export function sessionHeaders(cookies: string | undefined): Record<string, string> {
+  const header = cookies?.trim();
+  return header ? { Cookie: header } : {};
+}
+
+/** Search pages report throttling in `__DATA__.error_info` alongside an otherwise valid empty result. */
+export function assertSearchAvailable(data: Record<string, unknown>, url: string): void {
+  const info = typeof data.error_info === 'string' ? data.error_info.trim() : '';
+  if (!info) return;
+  if (/频繁|太快|稍后|限制/.test(info)) {
+    throw new HttpRequestError(`豆瓣暂时限制了搜索：${info}`, { code: 'RATE_LIMITED', url, retryable: true });
+  }
+  throw new ResponseSchemaError(`豆瓣搜索返回错误：${info}`, url);
+}
 
 export async function fetchJson<T>(url: string, headers: Record<string, string> = {}): Promise<T> {
   return httpClient.getJson<T>(url, headers);
@@ -29,7 +53,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export function decodeHtml(text: string): string {
+function decodeHtml(text: string): string {
   return text
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
@@ -41,7 +65,7 @@ export function decodeHtml(text: string): string {
     .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => String.fromCharCode(parseInt(code, 16)));
 }
 
-export function stripTags(text: string): string {
+function stripTags(text: string): string {
   return text
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -56,15 +80,7 @@ export function normalizeTitle(title: string): string {
   return cleanText(title).replace(/[\u200e\u200f\u202a-\u202e]/g, '').replace(/\s*\([^)]*\)\s*$/, '').trim();
 }
 
-export function isChallengePage(html: string): boolean {
-  return isChallengeHtml(html);
-}
-
-export function isLoginPage(html: string): boolean {
-  return isLoginHtml(html);
-}
-
-export function escapeRegExp(text: string): string {
+function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 

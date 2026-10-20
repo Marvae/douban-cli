@@ -1,4 +1,5 @@
 import {
+  assertSearchAvailable,
   cleanText,
   extractField,
   extractWindowJsonObject,
@@ -184,6 +185,7 @@ export function parseBookSearchPage(
   if (!isRecord(parsed) || !Array.isArray(parsed.items)) {
     throw new ResponseSchemaError('图书搜索页 __DATA__.items 不是数组', url, rawData.slice(0, 240));
   }
+  assertSearchAvailable(parsed, url);
 
   const items = parsed.items
     .filter(isRecord)

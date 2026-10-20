@@ -56,7 +56,6 @@ commands/* -> api/account.ts -> serializer -> storage/secure-file.ts
   - `account.ts` — authenticated profile and collection reads.
   - `mutations.ts` — CSRF resolution and non-idempotent account endpoints.
   - `index.ts` — public unauthenticated read APIs only; authenticated modules are imported directly.
-  - `user.ts` — compatibility wrapper for older movie collection callers.
 - `src/auth.ts` — browser-cookie login, account selection, identity verification, and encrypted auth cache.
 - `src/storage/secure-file.ts` — atomic private-file writes with restrictive permissions.
 - `src/utils/` — domain-independent errors, pagination, parsing, spinner, debug, and timing helpers.

@@ -1,4 +1,4 @@
-import { BASE, cleanText, extractField, fetchHtml, fetchJson, HttpRequestError, isChallengePage, isRecord, normalizeTitle, ResponseSchemaError } from './common.js';
+import { BASE, cleanText, extractField, fetchHtml, fetchJson, HttpRequestError, isRecord, normalizeTitle, ResponseSchemaError } from './common.js';
 import {
   getSubjectComments,
   getSubjectRatingStats,
@@ -266,8 +266,6 @@ function applyMobileDetail(detail: MovieDetail, response: MobileMovieResponse): 
 }
 
 function parseMovieDetailFromHtml(id: string, html: string): MovieDetail | null {
-  if (isChallengePage(html)) return null;
-
   const titleMatch = html.match(/<span\s+property="v:itemreviewed"[^>]*>([\s\S]*?)<\/span>/);
   const yearMatch = html.match(/<span[^>]*class="year"[^>]*>([\s\S]*?)<\/span>/);
   const ratingMatch = html.match(/<strong[^>]*property="v:average"[^>]*>([\s\S]*?)<\/strong>/);
@@ -550,7 +548,6 @@ export async function getTop250(start = 0, limit = 25): Promise<Top250Item[]> {
       pageStart += 25;
       continue;
     }
-    if (isChallengePage(html)) throw new Error('电影 Top250 页面触发了反爬挑战，暂时无法解析');
 
     // Split by item blocks
     const items = html.split('<div class="item">').slice(1);
@@ -616,7 +613,6 @@ export async function getTop250(start = 0, limit = 25): Promise<Top250Item[]> {
 export async function getComing(limit = 20): Promise<ComingItem[]> {
   if (!Number.isInteger(limit) || limit <= 0) return [];
   const html = await fetchHtml(`${BASE}/coming`, { Referer: BASE });
-  if (isChallengePage(html)) throw new Error('即将上映页面触发了反爬挑战，暂时无法解析');
 
   const results: ComingItem[] = [];
   const rowRegex = /<tr>\s*<td>\s*([\s\S]*?)<\/td>\s*<td>\s*<a[^>]*href="https:\/\/movie\.douban\.com\/subject\/(\d+)\/"[^>]*>([\s\S]*?)<\/a>\s*<\/td>\s*<td>\s*([\s\S]*?)<\/td>\s*<td>\s*([\s\S]*?)<\/td>\s*<td>\s*([\s\S]*?)<\/td>\s*<\/tr>/g;
@@ -648,7 +644,6 @@ export async function getComing(limit = 20): Promise<ComingItem[]> {
 export async function getWeekly(limit = 10): Promise<WeeklyItem[]> {
   if (!Number.isInteger(limit) || limit <= 0) return [];
   const html = await fetchHtml(`${BASE}/chart`, { Referer: BASE });
-  if (isChallengePage(html)) throw new Error('一周口碑榜页面触发了反爬挑战，暂时无法解析');
 
   const sectionMatch = html.match(/<h2>一周口碑榜[\s\S]*?<ul class="content" id="listCont2">([\s\S]*?)<\/ul>/);
   if (!sectionMatch) throw new Error('未找到一周口碑榜数据区域');

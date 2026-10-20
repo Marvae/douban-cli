@@ -1,4 +1,15 @@
-import { cleanText, extractWindowJsonObject, fetchHtml, fetchJson, isRecord, normalizeTitle, ResponseSchemaError } from './common.js';
+import {
+  assertSearchAvailable,
+  cleanText,
+  extractWindowJsonObject,
+  fetchHtml,
+  fetchJson,
+  isRecord,
+  normalizeTitle,
+  ResponseSchemaError,
+  sessionHeaders,
+  type SessionReadOptions
+} from './common.js';
 import { debug } from '../utils/debug.js';
 
 export interface SearchItem {
@@ -23,6 +34,10 @@ interface SuggestResult {
   items: SearchItem[];
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function readPaginationValue(
   data: Record<string, unknown>,
   field: 'start' | 'count' | 'total',
@@ -35,10 +50,11 @@ function readPaginationValue(
   return value;
 }
 
-async function fetchSuggestions(keyword: string): Promise<SuggestResult> {
+async function fetchSuggestions(keyword: string, cookies?: string): Promise<SuggestResult> {
   const url = `https://movie.douban.com/j/subject_suggest?q=${encodeURIComponent(keyword)}`;
   const response = await fetchJson<unknown>(url, {
-    Referer: 'https://movie.douban.com/'
+    Referer: 'https://movie.douban.com/',
+    ...sessionHeaders(cookies)
   });
   if (!Array.isArray(response)) {
     throw new ResponseSchemaError('电影建议接口返回格式异常', url);
@@ -90,6 +106,7 @@ export function parseMovieSearchPage(html: string, url = 'https://search.douban.
   if (!isRecord(parsed) || !Array.isArray(parsed.items)) {
     throw new ResponseSchemaError('搜索页 __DATA__.items 不是数组', url, rawData.slice(0, 240));
   }
+  assertSearchAvailable(parsed, url);
 
   const items = parsed.items
     .filter(isRecord)
@@ -123,16 +140,19 @@ export function parseMovieSearchPage(html: string, url = 'https://search.douban.
   return { items, start, count, total };
 }
 
-/**
- * Search movies through the HTML search endpoint and aggregate its 15-item pages.
- */
-export async function searchMovies(keyword: string, start = 0, limit = 20): Promise<SearchItem[]> {
+/** Search movies through the HTML search endpoint and aggregate its 15-item pages. */
+export async function searchMovies(
+  keyword: string,
+  start = 0,
+  limit = 20,
+  options: SessionReadOptions = {}
+): Promise<SearchItem[]> {
   const query = keyword.trim();
   if (!query) return [];
   if (!Number.isInteger(start) || start < 0) throw new Error('start 必须是非负整数');
   if (!Number.isInteger(limit) || limit <= 0) return [];
 
-  const suggestionPromise = fetchSuggestions(query).catch((error): SuggestResult => {
+  const suggestionPromise = fetchSuggestions(query, options.cookies).catch((error): SuggestResult => {
     const message = error instanceof Error ? error.message : String(error);
     debug('search', `suggest 接口失败: ${message}`);
     return { years: new Map<string, string>(), items: [] };
@@ -148,15 +168,18 @@ export async function searchMovies(keyword: string, start = 0, limit = 20): Prom
     const pageUrl = `https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(query)}&cat=1002&start=${pageStart}`;
     let page: MovieSearchPage;
     try {
-      const html = await fetchHtml(pageUrl, { Referer: 'https://www.douban.com/' });
+      const html = await fetchHtml(pageUrl, { Referer: 'https://www.douban.com/', ...sessionHeaders(options.cookies) });
       page = parseMovieSearchPage(html, pageUrl);
       if (page.start !== pageStart) {
         throw new ResponseSchemaError(`电影搜索分页起点异常：请求 ${pageStart}，返回 ${page.start}`, pageUrl);
       }
     } catch (error) {
-      if (results.length === 0) firstPageError = error;
-      const message = error instanceof Error ? error.message : String(error);
-      debug('search', `${results.length > 0 ? '后续搜索页失败，保留已有结果' : '首个搜索页失败'}: ${message}`);
+      if (results.length === 0) {
+        firstPageError = error;
+      } else {
+        options.warnings?.push(`后续搜索页读取失败，结果可能不完整：${errorMessage(error)}`);
+      }
+      debug('search', `${results.length > 0 ? '后续搜索页失败，保留已有结果' : '首个搜索页失败'}: ${errorMessage(error)}`);
       break;
     }
 
@@ -177,6 +200,7 @@ export async function searchMovies(keyword: string, start = 0, limit = 20): Prom
 
   const suggestions = await suggestionPromise;
   if (results.length === 0 && firstPageError && start === 0 && suggestions.items.length > 0) {
+    options.warnings?.push(`完整搜索不可用（${errorMessage(firstPageError)}），以下为联想结果，可能不完整且缺少评分`);
     return suggestions.items.slice(0, limit);
   }
   if (results.length === 0 && firstPageError) throw firstPageError;

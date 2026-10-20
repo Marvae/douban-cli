@@ -2,12 +2,14 @@ import {
   BOOK_BASE,
   cleanText,
   fetchHtml,
+  fetchHtmlPage,
   fetchJson,
   HttpRequestError,
-  isChallengePage,
   isRecord,
   normalizeTitle,
-  ResponseSchemaError
+  ResponseSchemaError,
+  sessionHeaders,
+  type SessionReadOptions
 } from './common.js';
 import {
   parseBookDetailHtml,
@@ -219,7 +221,6 @@ export async function getBookChart(category = '全部', limit = 20): Promise<Boo
 
   const query = subcat ? `?subcat=${encodeURIComponent(subcat)}` : '';
   const html = await fetchHtml(`${BOOK_BASE}/chart${query}`, { Referer: BOOK_BASE });
-  if (isChallengePage(html)) throw new Error('热门图书榜触发了反爬挑战，暂时无法解析');
   const items = parseBookMediaList(html);
   if (items.length === 0) {
     throw new ResponseSchemaError('热门图书榜页面未解析出预期条目', `${BOOK_BASE}/chart${query}`);
@@ -241,7 +242,6 @@ export async function getLatestBooks(category = '全部', limit = 20): Promise<B
 
   const query = category === '全部' ? '' : `?subcat=${encodeURIComponent(category)}`;
   const html = await fetchHtml(`${BOOK_BASE}/latest${query}`, { Referer: BOOK_BASE });
-  if (isChallengePage(html)) throw new Error('新书速递页面触发了反爬挑战，暂时无法解析');
   const items = parseBookMediaList(html);
   if (items.length === 0) {
     throw new ResponseSchemaError('新书速递页面未解析出预期条目', `${BOOK_BASE}/latest${query}`);
@@ -249,10 +249,11 @@ export async function getLatestBooks(category = '全部', limit = 20): Promise<B
   return items.slice(0, limit);
 }
 
-async function searchBookSuggestions(keyword: string, limit: number): Promise<BookSearchItem[]> {
+async function searchBookSuggestions(keyword: string, limit: number, cookies?: string): Promise<BookSearchItem[]> {
   const url = `${BOOK_BASE}/j/subject_suggest?q=${encodeURIComponent(keyword)}`;
   const response = await fetchJson<unknown>(url, {
-    Referer: `${BOOK_BASE}/`
+    Referer: `${BOOK_BASE}/`,
+    ...sessionHeaders(cookies)
   });
 
   if (!Array.isArray(response)) {
@@ -284,11 +285,30 @@ async function searchBookSuggestions(keyword: string, limit: number): Promise<Bo
     .slice(0, limit);
 }
 
-/**
- * Search books by keyword. Douban returns 15 subjects per page, so aggregate
- * pages until the requested limit is satisfied.
- */
-export async function searchBooks(keyword: string, start = 0, limit = 20): Promise<BookSearchItem[]> {
+/** Normalize an ISBN-10 or ISBN-13 (hyphens and spaces allowed), or return null. */
+export function parseIsbn(input: string): string | null {
+  const compact = input.replace(/[\s-]/g, '').toUpperCase();
+  return /^(?:97[89]\d{10}|\d{9}[\dX])$/.test(compact) ? compact : null;
+}
+
+/** Resolve an ISBN through the `/isbn/<isbn>/` redirect, which is not throttled like search. */
+export async function resolveBookIdByIsbn(isbn: string): Promise<string> {
+  const normalized = parseIsbn(isbn);
+  if (!normalized) throw new Error(`ISBN 格式无效：${isbn}`);
+  const url = `${BOOK_BASE}/isbn/${normalized}/`;
+  const page = await fetchHtmlPage(url, { Referer: `${BOOK_BASE}/` });
+  const id = new URL(page.url).pathname.match(/^\/subject\/(\d+)\/?$/)?.[1];
+  if (!id) throw new Error(`未找到 ISBN 对应的图书：${normalized}`);
+  return id;
+}
+
+/** Search books by keyword, aggregating Douban's 15-item pages up to the limit. */
+export async function searchBooks(
+  keyword: string,
+  start = 0,
+  limit = 20,
+  options: SessionReadOptions = {}
+): Promise<BookSearchItem[]> {
   const query = keyword.trim();
   if (!query) return [];
   if (!Number.isInteger(start) || start < 0) throw new Error('start 必须是非负整数');
@@ -303,8 +323,7 @@ export async function searchBooks(keyword: string, start = 0, limit = 20): Promi
   for (let pageNumber = 0; pageNumber < maxPages && results.length < limit; pageNumber += 1) {
     const url = `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(query)}&cat=1001&start=${pageStart}`;
     try {
-      const html = await fetchHtml(url, { Referer: 'https://www.douban.com/' });
-      if (isChallengePage(html)) throw new Error('图书搜索页面触发了反爬挑战');
+      const html = await fetchHtml(url, { Referer: 'https://www.douban.com/', ...sessionHeaders(options.cookies) });
 
       const page = parseBookSearchPage(html, url);
       if (page.start !== pageStart) {
@@ -321,8 +340,12 @@ export async function searchBooks(keyword: string, start = 0, limit = 20): Promi
       if (nextStart <= pageStart) throw new ResponseSchemaError('图书搜索分页游标没有前进', url);
       pageStart = nextStart;
     } catch (error) {
-      if (results.length === 0) firstPageError = error;
       const message = error instanceof Error ? error.message : String(error);
+      if (results.length === 0) {
+        firstPageError = error;
+      } else {
+        options.warnings?.push(`后续搜索页读取失败，结果可能不完整：${message}`);
+      }
       debug('book', `${results.length > 0 ? '后续搜索页失败，保留已有结果' : '完整搜索失败，准备回退建议接口'}: ${message}`);
       break;
     }
@@ -334,8 +357,12 @@ export async function searchBooks(keyword: string, start = 0, limit = 20): Promi
     return [];
   }
   try {
-    const suggestions = await searchBookSuggestions(query, limit);
+    const suggestions = await searchBookSuggestions(query, limit, options.cookies);
     if (suggestions.length === 0 && firstPageError) throw firstPageError;
+    if (firstPageError) {
+      const reason = firstPageError instanceof Error ? firstPageError.message : String(firstPageError);
+      options.warnings?.push(`完整搜索不可用（${reason}），以下为联想结果，可能不完整且缺少评分`);
+    }
     return suggestions;
   } catch (suggestionError) {
     if (firstPageError) throw firstPageError;
@@ -374,11 +401,10 @@ interface MobileBookResponse {
 
 async function fetchBookHtmlDetail(bookId: string): Promise<ParsedBookDetail> {
   const html = await fetchHtml(`${BOOK_BASE}/subject/${bookId}/`, { Referer: BOOK_BASE });
-  if (isChallengePage(html)) throw new Error('图书详情页面触发了反爬挑战');
   return parseBookDetailHtml(html);
 }
 
-export async function getBookTags(id: string): Promise<string[]> {
+async function getBookTags(id: string): Promise<string[]> {
   const bookId = id.trim();
   if (!/^\d+$/.test(bookId)) throw new Error('书籍 ID 必须是纯数字');
 

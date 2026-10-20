@@ -25,7 +25,7 @@ afterEach(() => {
   rmSync(directory, { recursive: true, force: true });
 });
 
-it('public getUserCollection stays anonymous even with a cached CLI session', async () => {
+it('public getUserCollectionPage stays anonymous even with a cached CLI session', async () => {
   const fetchMock = vi.fn().mockImplementation(async () => new Response(
     '<a class="lnk-mine" href="https://www.douban.com/people/alice/">Alice</a>',
     { headers: { 'Content-Type': 'text/html' } }
@@ -36,13 +36,13 @@ it('public getUserCollection stays anonymous even with a cached CLI session', as
   fetchMock.mockClear();
   fetchMock.mockImplementation(async () => new Response(fixture, { headers: { 'Content-Type': 'text/html' } }));
   const api = await import('../api/index.ts');
-  const items = await api.getUserCollection('someone-else', 'collect', 2);
-  expect(items).toHaveLength(2);
+  const page = await api.getUserCollectionPage({ kind: 'movie', userId: 'someone-else', status: 'collect', start: 0, count: 2 });
+  expect(page.items).toHaveLength(2);
   expect(fetchMock).toHaveBeenCalledOnce();
   expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Cookie')).toBeNull();
 });
 
-it('public getUserCollection does not modify a malformed CLI auth cache', async () => {
+it('public getUserCollectionPage does not modify a malformed CLI auth cache', async () => {
   const storage = path.join(directory, 'storage');
   mkdirSync(storage, { mode: 0o700 });
   const cache = path.join(storage, 'auth.json');
@@ -51,6 +51,6 @@ it('public getUserCollection does not modify a malformed CLI auth cache', async 
     headers: { 'Content-Type': 'text/html' }
   })));
   const api = await import('../api/index.ts');
-  await api.getUserCollection('someone-else', 'collect', 2);
+  await api.getUserCollectionPage({ kind: 'movie', userId: 'someone-else', status: 'collect', start: 0, count: 2 });
   expect(existsSync(cache)).toBe(true);
 });
