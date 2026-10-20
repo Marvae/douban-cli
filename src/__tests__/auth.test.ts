@@ -83,7 +83,7 @@ function netscapeCookieLine(name: string, value: string, options: {
   return `${prefix}${domain}\t${includeSubdomains}\t${options.cookiePath ?? '/'}\tTRUE\t${expires}\t${name}\t${value}`;
 }
 
-describe.sequential('authentication safety', () => {
+describe('authentication safety', () => {
   it('optional session lookup stays offline when no cache exists', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
