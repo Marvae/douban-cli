@@ -13,7 +13,7 @@ Unofficial Douban CLI for movies, TV shows, books, collections, and authenticate
 
 > 电影、图书、豆列等公开查询无需登录。**用户收藏（片单/书单）的匿名结果可能不完整，部分请求也可能被豆瓣拒绝**，CLI 会自动复用已有的本地登录态；没有登录态时仍按匿名请求。可先运行 `douban login`，以当前账号的可见范围查询收藏。账号身份、电影标记/评分/评论、个人统计与私有导出需要登录。
 >
-> 当前登录后的写操作仅支持电影；图书功能均为只读查询与导出。
+> 登录后可以标记、评分、写短评和管理标签，电影和图书都支持；长评目前只支持电影。
 
 **导航：** [快速开始](#-快速开始) · [电影与剧集](#-电影与剧集) · [图书](#-图书) · [用户收藏](#-用户收藏豆列与配置) · [账号操作](#-登录个人数据与账号操作) · [批量操作](#-批量操作) · [JSON](#-json-输出与脚本化)
 
@@ -210,23 +210,24 @@ douban login --cookie-file /path/to/douban-cookies.txt
 
 登录缓存会加密保存在本地，账号写操作前会重新核对身份。
 
-### 电影标记、评分与评论
+### 标记、评分、短评与标签（电影和图书）
 
-以下操作会修改当前豆瓣账号，而且目前只支持电影：
+以下操作会修改当前豆瓣账号。电影命令在根目录，图书命令在 `book` 下，用法一致：
 
 ```bash
-douban mark 1292052 --wish
-douban mark 1292052 --watched
-douban mark 1292052 --watching
-douban unmark 1292052
-
+douban mark 1292052 --wish                  # 电影：--wish / --watched / --watching
+douban book mark 2567698 --read             # 图书：--wish / --read / --reading
 douban rate 1292052 --score 5
-douban comment 1292052 "值得二刷"
-douban review 1292052 "标题" "长评正文"
-douban review 1292052 "标题" --file review.md
+douban book comment 2567698 "值得重读" --tags 科幻,经典 --private
+douban record 1292052                       # 查看自己对该条目的状态、评分、短评、标签和可见性
+douban book unmark 2567698 --dry-run        # 先预览，确认后去掉 --dry-run
+douban review 1292052 "标题" --file review.md  # 长评（仅电影）
 ```
 
-`rate` 和 `comment` 会按“看过”状态提交。`mark` 的 `--wish`、`--watched`、`--watching` 三种状态必须且只能选择一个。
+- 每次写入都会先读取当前记录，只修改你指定的字段，提交后再读回核对；评分、短评、标签和“仅自己可见”不会被意外清空，也从不勾选“分享到广播”。
+- `--dry-run` 只显示修改前后的对比，不提交。`--tags` 覆盖原有标签；`--private` / `--public` 切换可见性。
+- `rate` 会把条目标为看过/读过；`comment` 保留原状态，未标记时标为看过/读过；`unmark` 会删除整条记录（含评分、短评、标签）。
+- 写入失败不会自动重试；读回结果与预期不一致时会报错并提示用 `record` 核对。
 
 ### 统计、导出与关注
 
@@ -255,7 +256,7 @@ douban logout
 
 ## 🧰 批量操作
 
-电影标记、取消标记、评分和短评支持 `--file`。默认在每次写入之间随机等待 1–2 秒，也可以通过 `--delay` 指定固定间隔。
+电影和图书的标记、取消标记、评分和短评都支持 `--file`。默认在每次写入之间随机等待 1–2 秒，也可以通过 `--delay` 指定固定间隔。
 
 ```bash
 douban mark --file ids.txt --wish

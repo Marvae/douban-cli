@@ -4,7 +4,8 @@ import {
   createReview,
   decodeExplicitMutation,
   followUser,
-  updateSubjectInterest
+  removeSubjectInterest,
+  submitSubjectInterestForm
 } from '../api/mutations.ts';
 
 afterEach(() => {
@@ -33,49 +34,40 @@ describe('mutation contracts', () => {
     expect(decodeExplicitMutation({ r: 0 })).toMatchObject({ r: 0 });
   });
 
-  it('omits rating and comment when an interest patch does not provide them', async () => {
+  it('posts the complete form to the subject origin with a ck token', async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ r: 0 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await updateSubjectInterest(
-      SUBJECT_ACTIONS.movie,
-      '1292052',
-      { interest: 'wish' },
-      'dbcl2=movie-interest',
-      'movie-ck'
-    );
-
-    const body = requestBody(fetchMock);
-    expect(body.get('interest')).toBe('wish');
-    expect(body.has('rating')).toBe(false);
-    expect(body.has('comment')).toBe(false);
-    expect(requestHeaders(fetchMock).get('Origin')).toBe('https://movie.douban.com');
-  });
-
-  it('uses the book descriptor and preserves an explicitly empty comment', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({ r: 0 }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await updateSubjectInterest(
+    await submitSubjectInterestForm(
       SUBJECT_ACTIONS.book,
       '2567698',
-      { interest: 'collect', rating: 5, comment: '' },
+      { interest: 'collect', rating: '5', comment: '', private: undefined },
       'dbcl2=book-interest',
       'book-ck'
     );
 
-    expect(String(fetchMock.mock.calls[0][0])).toContain('https://book.douban.com/j/subject/2567698/interest');
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://book.douban.com/j/subject/2567698/interest');
     expect(requestHeaders(fetchMock).get('Origin')).toBe('https://book.douban.com');
-    expect(requestBody(fetchMock).get('rating')).toBe('5');
-    expect(requestBody(fetchMock).has('comment')).toBe(true);
-    expect(requestBody(fetchMock).get('comment')).toBe('');
+    expect(Object.fromEntries(requestBody(fetchMock))).toEqual({ interest: 'collect', rating: '5', comment: '', ck: 'book-ck' });
+  });
+
+  it('removes a record through the subject page form and rejects a login redirect', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 302, headers: { Location: 'https://book.douban.com/subject/2567698/' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 302, headers: { Location: 'https://accounts.douban.com/passport/login' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await removeSubjectInterest(SUBJECT_ACTIONS.book, '2567698', 'dbcl2=remove', 'remove-ck');
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://book.douban.com/subject/2567698/remove');
+    expect(Object.fromEntries(requestBody(fetchMock))).toEqual({ ck: 'remove-ck' });
+    await expect(removeSubjectInterest(SUBJECT_ACTIONS.book, '2567698', 'dbcl2=remove', 'remove-ck')).rejects.toThrow('登录');
   });
 
   it('rejects an untrusted subject action host before sending cookies', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(updateSubjectInterest(
+    await expect(submitSubjectInterestForm(
       { kind: 'movie', baseUrl: 'https://movie.douban.com.evil.example' },
       '1292052',
       { interest: 'wish' },

@@ -40,12 +40,6 @@ export interface SubjectActionDescriptor {
   baseUrl: string;
 }
 
-export interface SubjectInterestPatch {
-  interest: SubjectInterest;
-  rating?: number;
-  comment?: string;
-}
-
 export const SUBJECT_ACTIONS: Record<SubjectActionKind, SubjectActionDescriptor> = {
   movie: { kind: 'movie', baseUrl: BASE },
   book: { kind: 'book', baseUrl: BOOK_BASE }
@@ -360,32 +354,32 @@ function subjectEndpoint<T>(
   };
 }
 
-export async function updateSubjectInterest(
+/**
+ * Post a complete interest form. Douban replaces every field of the record, so
+ * callers must start from the current form (see api/record.ts).
+ */
+export async function submitSubjectInterestForm(
   descriptor: SubjectActionDescriptor,
   subjectId: string,
-  patch: SubjectInterestPatch,
+  fields: Record<string, string | undefined>,
   cookies: string,
   existingCk?: string
 ): Promise<void> {
   const id = validateSubjectId(subjectId);
-  if (patch.rating !== undefined && (!Number.isInteger(patch.rating) || patch.rating < 1 || patch.rating > 5)) {
-    throw new Error('评分必须是 1-5 的整数');
-  }
-
   await withCkRetry(cookies, existingCk, id, async (ck) => {
     await postForm(
       subjectEndpoint(descriptor, id, `/j/subject/${id}/interest`, decodeRZeroMutation),
-      {
-        ck,
-        interest: patch.interest,
-        rating: patch.rating === undefined ? undefined : String(patch.rating),
-        comment: patch.comment
-      },
+      { ...fields, ck },
       cookies
     );
   }, descriptor.baseUrl);
 }
 
+/**
+ * Remove a record through the subject page's 删除 form. The JSON
+ * `removeinterest` endpoint and `interest=none` leave book records in place.
+ * The form answers with a redirect, so callers confirm by reading back.
+ */
 export async function removeSubjectInterest(
   descriptor: SubjectActionDescriptor,
   subjectId: string,
@@ -393,23 +387,28 @@ export async function removeSubjectInterest(
   existingCk?: string
 ): Promise<void> {
   const id = validateSubjectId(subjectId);
+  const origin = validateMutationUrl(descriptor.baseUrl).origin;
 
   await withCkRetry(cookies, existingCk, id, async (ck) => {
-    try {
-      await postForm(
-        subjectEndpoint(descriptor, id, `/j/subject/${id}/removeinterest`, decodeExplicitMutation),
-        { ck },
-        cookies
-      );
-    } catch (error) {
-      if (isCkRelatedError(error)) throw error;
-      if (!isUnsupportedEndpointError(error)) throw error;
-      debug('mutations', 'removeinterest endpoint unsupported; using interest=none fallback');
-      await postForm(
-        subjectEndpoint(descriptor, id, `/j/subject/${id}/interest`, decodeRZeroMutation),
-        { ck, interest: 'none' },
-        cookies
-      );
+    const response = await fetch(`${origin}/subject/${id}/remove`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        'User-Agent': UA,
+        Cookie: cookies,
+        Referer: `${origin}/subject/${id}/`,
+        Origin: origin,
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+      },
+      body: formEncode({ ck }),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    });
+    const redirected = response.status >= 300 && response.status < 400;
+    if (redirected && /accounts\.douban\.com|passport\/login/.test(response.headers.get('location') || '')) {
+      throw new Error('豆瓣要求重新登录后再删除收藏（请求被重定向到登录页）');
+    }
+    if (!response.ok && !redirected) {
+      throw new MutationHttpError(`删除收藏失败：HTTP ${response.status}`, response.status);
     }
   }, descriptor.baseUrl);
 }
@@ -451,10 +450,6 @@ export async function createReview(
       url: `${BASE}/review/${reviewId}/`
     };
   });
-}
-
-export async function unmarkSubject(movieId: string, cookies: string, existingCk?: string): Promise<void> {
-  await removeSubjectInterest(SUBJECT_ACTIONS.movie, movieId, cookies, existingCk);
 }
 
 export async function followUser(userId: string, cookies: string, existingCk?: string): Promise<void> {

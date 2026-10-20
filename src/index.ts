@@ -33,7 +33,7 @@ registerUserCommands(program);
 
 registerListCommands(program);
 registerAuthCommands(program);
-registerMarkCommands(program);
+registerMarkCommands(program, bookCommand);
 registerSocialCommands(program);
 
 const defaultHelp = new Help();

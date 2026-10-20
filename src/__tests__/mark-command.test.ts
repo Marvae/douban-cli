@@ -3,17 +3,18 @@ import { Command } from 'commander';
 
 const mocks = vi.hoisted(() => ({
   ensureAuth: vi.fn(),
-  updateSubjectInterest: vi.fn(),
-  unmarkSubject: vi.fn()
+  editSubjectRecord: vi.fn(),
+  getSubjectRecord: vi.fn(),
+  removeSubjectRecord: vi.fn()
 }));
 
 vi.mock('../auth.js', () => ({
   ensureAuth: mocks.ensureAuth
 }));
-vi.mock('../api/mutations.js', () => ({
-  SUBJECT_ACTIONS: { movie: 'movie' },
-  updateSubjectInterest: mocks.updateSubjectInterest,
-  unmarkSubject: mocks.unmarkSubject
+vi.mock('../api/record.js', () => ({
+  editSubjectRecord: mocks.editSubjectRecord,
+  getSubjectRecord: mocks.getSubjectRecord,
+  removeSubjectRecord: mocks.removeSubjectRecord
 }));
 vi.mock('../utils/spinner.js', () => ({
   withSpinner: vi.fn(async (_message: string, task: () => Promise<unknown>) => task())
@@ -26,7 +27,7 @@ const originalArgv = process.argv;
 function createProgram(): Command {
   const program = new Command();
   program.exitOverride();
-  registerMarkCommands(program);
+  registerMarkCommands(program, program.command('book'));
   return program;
 }
 
@@ -42,7 +43,8 @@ describe('mark commands', () => {
     ['mark', '1292052', '--wish', '--file', 'items.txt'],
     ['rate', '1292052', '--score', '5', '--file', 'ratings.txt'],
     ['comment', '1292052', 'good', '--file', 'comments.txt'],
-    ['unmark', '1292052', '--file', 'items.txt']
+    ['unmark', '1292052', '--file', 'items.txt'],
+    ['book', 'mark', '2567698', '--read', '--file', 'items.txt']
   ])('rejects mixed inline and batch input for %s', async (...args) => {
     process.argv = ['node', 'douban', ...args, '--json'];
     const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
