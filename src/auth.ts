@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes } from 'node:crypto';
-import { chmodSync, lstatSync, readFileSync, unlinkSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -989,13 +989,88 @@ function openLoginPage(options: LoginOptions): void {
   }
 }
 
+const CHROMIUM_COOKIE_ROOTS: Partial<Record<BrowserName, string[]>> = {
+  chrome: ['Google', 'Chrome'],
+  edge: ['Microsoft Edge'],
+  arc: ['Arc', 'User Data']
+};
+
+async function importNodeSqlite(): Promise<typeof import('node:sqlite')> {
+  // Importing node:sqlite emits an ExperimentalWarning; silence only that one.
+  const emitWarning = process.emitWarning;
+  process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
+    if (String(warning instanceof Error ? warning.message : warning).includes('SQLite is an experimental feature')) return;
+    return (emitWarning as (...values: unknown[]) => void).call(process, warning, ...args);
+  }) as typeof process.emitWarning;
+  try {
+    return await import('node:sqlite');
+  } finally {
+    process.emitWarning = emitWarning;
+  }
+}
+
+/**
+ * Whether a Chromium browser's default macOS profile stores a Douban login.
+ * Cookie names and hosts are not encrypted, so this reads no Keychain secret
+ * and cannot trigger a Safe Storage prompt. Returns undefined when unknown.
+ */
+export async function hasStoredDoubanLogin(
+  browser: BrowserName,
+  profile: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+  home = os.homedir()
+): Promise<boolean | undefined> {
+  const root = CHROMIUM_COOKIE_ROOTS[browser];
+  if (platform !== 'darwin' || !root || profile !== undefined) return undefined;
+  const profileDir = path.join(home, 'Library', 'Application Support', ...root, 'Default');
+  const dbPath = [path.join(profileDir, 'Network', 'Cookies'), path.join(profileDir, 'Cookies')].find((file) => existsSync(file));
+  if (!dbPath) return undefined;
+
+  // Query a private copy: the browser may hold the database open.
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'douban-cli-cookies-'));
+  try {
+    for (const suffix of ['', '-wal', '-shm']) {
+      if (existsSync(dbPath + suffix)) copyFileSync(dbPath + suffix, path.join(directory, `Cookies${suffix}`));
+    }
+    const { DatabaseSync } = await importNodeSqlite();
+    const db = new DatabaseSync(path.join(directory, 'Cookies'));
+    try {
+      return db.prepare(
+        "SELECT 1 FROM cookies WHERE name = 'dbcl2' AND (host_key = 'douban.com' OR host_key LIKE '%.douban.com') LIMIT 1"
+      ).get() !== undefined;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return undefined;
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+/** Ask before opening the login page; declining ends the login. */
+async function offerLoginPage(options: LoginOptions & { browser: BrowserName }): Promise<void> {
+  const rl = readline.createInterface({ input, output: promptOutput });
+  const source = sourceLabel(options.browser, options.profile);
+  let answer: string;
+  try {
+    answer = await rl.question(`${source} 里还没有登录豆瓣。要在 ${source} 中打开豆瓣登录页吗？[Y/n] `);
+  } finally {
+    rl.close();
+  }
+  if (/^n/i.test(answer.trim())) {
+    throw new Error(`未在 ${source} 中找到豆瓣登录：请先在浏览器登录豆瓣，或用 --browser 选择其他浏览器`);
+  }
+  openLoginPage(options);
+}
+
 async function waitForEnter(browser: BrowserName, profile: string | undefined, opened: boolean): Promise<void> {
   assertInteractiveLogin(input.isTTY);
   const rl = readline.createInterface({ input, output: promptOutput });
   const source = sourceLabel(browser, profile);
   const preparation = opened
     ? `已打开 ${source} 的豆瓣当前账号页；该窗口仅用于完成登录。CLI 将从 ${source} 读取 Cookie，并以验证到的豆瓣账号为准。`
-    : `将从 ${source} 读取 Cookie 并验证豆瓣账号；本命令默认不启动浏览器，如需打开账号页请按 Ctrl+C 后运行 douban login --open。`;
+    : `将从 ${source} 读取 Cookie 并验证豆瓣账号。`;
   try {
     await rl.question(`${preparation}确认已登录后按回车；若 macOS 随后请求访问浏览器 Safe Storage，请选择允许...`);
   } finally {
@@ -1077,10 +1152,28 @@ export async function loginWithBrowser(options: LoginOptions = {}): Promise<Veri
   validateLoginOptions(options);
   assertInteractiveLogin(input.isTTY);
 
-  const selectedBrowser = options.browser ?? detectDefaultBrowser();
-  if (options.open) openLoginPage(options);
-  await waitForEnter(selectedBrowser, options.profile, Boolean(options.open));
-  return loginFromBrowserCookies({ ...options, browser: selectedBrowser });
+  const browser = options.browser ?? detectDefaultBrowser();
+  const target = { ...options, browser };
+  let opened = Boolean(options.open);
+  if (opened) {
+    openLoginPage(target);
+  } else if (await hasStoredDoubanLogin(browser, options.profile) === false) {
+    // Known to be logged out: ask before reading, so no Safe Storage prompt is wasted.
+    await offerLoginPage(target);
+    opened = true;
+  }
+  await waitForEnter(browser, options.profile, opened);
+
+  let candidates = await extractFromBrowsers(target);
+  // The pre-check cannot see every browser; offer the login page once here too.
+  if (candidates.length === 0 && !opened && options.profile === undefined) {
+    await offerLoginPage(target);
+    await waitForEnter(browser, options.profile, true);
+    candidates = await extractFromBrowsers(target);
+  }
+  const selected = await selectVerifiedSession(candidates);
+  saveAuthCache(selected);
+  return selected;
 }
 
 export async function detectAuthSession(): Promise<AuthSession | null> {

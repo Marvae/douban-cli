@@ -387,7 +387,6 @@ describe('authentication safety', () => {
     expect(spawnSyncMock).not.toHaveBeenCalled();
     expect(getCookies).toHaveBeenCalledOnce();
     expect(question).toHaveBeenCalledWith(expect.stringContaining('将从 Chrome 读取 Cookie 并验证豆瓣账号'));
-    expect(question).toHaveBeenCalledWith(expect.stringContaining('douban login --open'));
 
     await auth.loginWithBrowser({ browser: 'chrome', open: true });
 
@@ -395,6 +394,47 @@ describe('authentication safety', () => {
     expect(getCookies).toHaveBeenCalledTimes(2);
     expect(question.mock.calls[1]?.[0]).toContain('该窗口仅用于完成登录');
     expect(question.mock.calls[1]?.[0]).toContain('以验证到的豆瓣账号为准');
+  });
+
+  it('asks before opening the login page when the browser has no Douban login', async () => {
+    const spawnSyncMock = vi.fn().mockReturnValue({ status: 0 });
+    const question = vi.fn().mockResolvedValueOnce('').mockResolvedValueOnce('y').mockResolvedValueOnce('');
+    const getCookies = vi.fn()
+      .mockResolvedValueOnce({ cookies: [], warnings: [] })
+      .mockResolvedValueOnce({ cookies: [{ name: 'dbcl2', value: 'after-login', source: { browser: 'chrome' } }], warnings: [] });
+    vi.doMock('node:child_process', () => ({ spawnSync: spawnSyncMock }));
+    vi.doMock('node:readline/promises', () => ({ default: { createInterface: () => ({ question, close: vi.fn() }) } }));
+    vi.doMock('@steipete/sweet-cookie', () => ({ getCookies }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(profileHtml('alice', 'Alice'), { status: 200 })));
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    const auth = await import('../auth.ts');
+
+    await expect(auth.loginWithBrowser({ browser: 'chrome' })).resolves.toMatchObject({ accountId: 'alice' });
+    expect(question.mock.calls[1]?.[0]).toContain('要在 Chrome 中打开豆瓣登录页吗');
+    expect(spawnSyncMock).toHaveBeenCalledOnce();
+    expect(getCookies).toHaveBeenCalledTimes(2);
+
+    question.mockResolvedValueOnce('').mockResolvedValueOnce('n');
+    getCookies.mockResolvedValueOnce({ cookies: [], warnings: [] });
+    await expect(auth.loginWithBrowser({ browser: 'chrome' })).rejects.toThrow('未在 Chrome 中找到豆瓣登录');
+    expect(spawnSyncMock).toHaveBeenCalledOnce();
+  });
+
+  it('detects a stored Chromium login from cookie names without the Keychain', async () => {
+    const profileDir = path.join(tempHome, 'Library', 'Application Support', 'Arc', 'User Data', 'Default');
+    mkdirSync(profileDir, { recursive: true });
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(path.join(profileDir, 'Cookies'));
+    db.exec("CREATE TABLE cookies (host_key TEXT, name TEXT, encrypted_value BLOB); INSERT INTO cookies VALUES ('.douban.com', 'dbcl2', x'00')");
+    const auth = await import('../auth.ts');
+
+    await expect(auth.hasStoredDoubanLogin('arc', undefined, 'darwin', tempHome)).resolves.toBe(true);
+    db.exec("DELETE FROM cookies");
+    db.close();
+    await expect(auth.hasStoredDoubanLogin('arc', undefined, 'darwin', tempHome)).resolves.toBe(false);
+    await expect(auth.hasStoredDoubanLogin('arc', 'Profile 2', 'darwin', tempHome)).resolves.toBeUndefined();
+    await expect(auth.hasStoredDoubanLogin('firefox', undefined, 'darwin', tempHome)).resolves.toBeUndefined();
+    await expect(auth.hasStoredDoubanLogin('arc', undefined, 'linux', tempHome)).resolves.toBeUndefined();
   });
 
   it('does not inspect or open a browser for non-interactive browser login', async () => {
