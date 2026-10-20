@@ -35,7 +35,11 @@
     "rating",
     "search",
     "terminal",
-    "command-line"
+    "command-line",
+    "pi-package",
+    "agent-skills",
+    "claude-code",
+    "codex"
   ],
   "author": "Marvae",
   "license": "MIT",
@@ -60,10 +64,16 @@
   },
   "files": [
     "dist",
+    "skills",
     "README.md",
     "LICENSE"
   ],
   "engines": {
     "node": ">=22.13.0"
+  },
+  "pi": {
+    "skills": [
+      "./skills"
+    ]
   }
 }

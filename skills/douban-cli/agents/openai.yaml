@@ -1,0 +1,4 @@
+interface:
+  display_name: "豆瓣 Douban"
+  short_description: "Query Douban movies and books, manage your marks"
+  default_prompt: "Use $douban-cli to list Douban's top-rated sci-fi movies with year and rating."

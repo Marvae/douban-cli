@@ -2,343 +2,83 @@
 
 [![npm version](https://img.shields.io/npm/v/%40marvae24%2Fdouban-cli.svg)](https://www.npmjs.com/package/@marvae24/douban-cli)
 [![npm downloads](https://img.shields.io/npm/dm/%40marvae24%2Fdouban-cli.svg)](https://www.npmjs.com/package/@marvae24/douban-cli)
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.13.0-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![CI](https://github.com/Marvae/douban-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Marvae/douban-cli/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Unofficial Douban CLI for movies, TV shows, books, collections, and authenticated movie actions.
+豆瓣的命令行工具：查电影、剧集、图书、豆列和用户收藏，登录后管理自己的标记、评分、短评和标签。在终端里显示表格，也能以 JSON 交给脚本和 AI agent。
 
-在终端里浏览豆瓣电影、剧集、图书和用户收藏，也可以登录后管理自己的电影记录。
+Unofficial Douban CLI for movies, TV shows, books, doulists and your own Douban records — for people, scripts and AI agents.
 
-`douban-cli` 不只是一个搜索命令：它覆盖影视发现、Top250 与口碑榜、电影和图书详情、评分分布、短评/长评/读书笔记、公开片单与书单、交互翻页、JSON 输出、批量标记和数据导出。
+## 在 AI agent 里使用
 
-> 电影、图书、豆列等公开查询无需登录。**用户收藏（片单/书单）的匿名结果可能不完整，部分请求也可能被豆瓣拒绝**，CLI 会自动复用已有的本地登录态；没有登录态时仍按匿名请求。可先运行 `douban login`，以当前账号的可见范围查询收藏。账号身份、电影标记/评分/评论、个人统计与私有导出需要登录。
->
-> 登录后可以标记、评分、写短评和管理标签，电影和图书都支持；长评目前只支持电影。
+把这句话发给你的 agent（ChatGPT / Codex、Claude Code、pi 等）：
 
-**导航：** [快速开始](#-快速开始) · [电影与剧集](#-电影与剧集) · [图书](#-图书) · [用户收藏](#-用户收藏豆列与配置) · [账号操作](#-登录个人数据与账号操作) · [批量操作](#-批量操作) · [JSON](#-json-输出与脚本化)
+> 安装这个 skill 并帮我配置好：https://github.com/Marvae/douban-cli/tree/main/skills/douban-cli
 
-## ✨ 功能亮点
-
-- 🎬 **电影与剧集发现**：热门、剧集标签、类型排行、电影 Top250、即将上映、一周口碑榜。
-- 🔎 **条目深度查询**：电影支持 ID 或片名；图书支持豆瓣 ID、ISBN 或关键词自动解析。
-- 📚 **完整图书链路**：图书 Top250、当前热门榜、新书速递、搜索、评分、短评、书评、读书笔记。
-- 🗂️ **用户收藏与导出**：查看公开的想看/在看/看过、想读/在读/读过，并导出书单或个人观影记录。
-- 🔐 **登录后账号操作**：标记、评分、短评、长评、关注和观影统计；支持批量文件。
-- 🤖 **适合脚本化和 AI 分析**：多数命令支持 `--json`，个人影音记录可导出为结构化数据，错误也提供稳定的结构化输出。
-- ⌨️ **终端友好**：表格输出、加载状态、交互翻页、已访问页面缓存，以及 partial result warning。
-
-## 🚀 快速开始
+也可以在终端安装：
 
 ```bash
-# 发现一部电影
-douban hot
-douban rank 科幻 --limit 10
-douban movie "沙丘"
-
-# 找一本书并继续查看内容
-douban book search "三体"
-douban book info 9787536692930
-douban book comments 三体
-
-# 查看或导出公开收藏
-douban user USER_ID --wish
-douban book user USER_ID --reading
-douban book export USER_ID --wish -o books.md
-
-# 给脚本消费
-douban search "奥本海默" --json
+npx skills add Marvae/douban-cli          # 安装到本机支持 Agent Skills 的 agent
+pi install npm:@marvae24/douban-cli       # pi：同时装好 Skill 和 CLI
 ```
 
-## 📦 安装
+之后直接提要求就行，例如“最近在上映的电影里哪些评分超过 7.5？”“把《三体》标成读过，评 5 星，仅自己可见”。
 
-需要 Node.js 22.13.0 或更高版本。
+- Skill 会在需要时帮你安装 CLI（需要 Node.js 22.13+）。
+- 账号功能需要你在自己的终端里运行一次 `douban login`，它会读取浏览器里已有的豆瓣登录。
+- 修改账号前，agent 会先预览改动，经你确认后才提交。
+
+## 自己在终端使用
 
 ```bash
-npm install -g @marvae24/douban-cli
+npm install -g @marvae24/douban-cli    # 需要 Node.js 22.13+；或用 npx @marvae24/douban-cli <命令>
+
+douban now                             # 正在热映
+douban movie 沙丘                      # 电影详情，可用 ID 或片名，附相似推荐
+douban comments 沙丘 -n 10             # 热门短评
+douban book info 9787536692930         # 图书详情，可用 ID、ISBN 或书名
+douban list 240962                     # 读取豆列
+douban login                           # 登录后可标记、评分、写短评
+douban book mark 2567698 --read --private --dry-run   # 先预览，确认后去掉 --dry-run
 ```
 
-安装后使用 `douban`：
+所有命令都支持 `douban <命令> --help`。
 
-```bash
-douban hot
-douban --help
-douban book --help
-```
+## 能做什么
 
-也可以不安装，直接通过 `npx` 运行：
+| 分类 | 命令 |
+|---|---|
+| 电影与剧集 | `hot` `tv` `rank` `top250` `now` `coming` `weekly` `search` `movie` `rating` `comments` `reviews` |
+| 图书 | `book top250` `chart` `new` `search` `info` `rating` `comments` `reviews` `notes` |
+| 用户与豆列 | `user` `book user` `me` `list` `config` |
+| 账号 | `login` `whoami` `logout` `stats` `export` `book export` |
+| 写入（电影和图书） | `mark` `rate` `comment` `unmark` `record`，图书加 `book` 前缀；`review` `follow` `unfollow` |
+| 诊断 | `doctor` |
 
-```bash
-npx @marvae24/douban-cli hot
-```
+详细说明：[命令参考](docs/commands.md) · [登录、写入与导出](docs/account.md) · [脚本化、分页与排查](docs/scripting.md)
 
-## 🎬 电影与剧集
+## 特点
 
-这一组命令都是公开只读请求，无需登录，并且全部支持 `--json`。
+- **输入随意**：电影可用 ID 或片名，图书可用 ID、ISBN 或书名；详情附“喜欢这部/本的人也喜欢”。
+- **写入安全**：每次修改都先读取原记录，只改你指定的字段，再读回核对；不会清空原有评分、短评、标签或“仅自己可见”，从不分享到广播；支持 `--dry-run`、`--tags`、`--private`。
+- **如实报告**：豆瓣限流时返回 `RATE_LIMITED`，不会伪装成“没有结果”；只取到部分数据时会提示。搜索会自动复用本地登录态，减少被限流。
+- **适合程序调用**：`--json` 输出、稳定的错误码，提示信息写到 stderr，不影响 JSON 解析。
+- **轻量**：2 个运行时依赖，不需要浏览器自动化。
 
-| 命令 | 能做什么 | 常用参数 |
-|---|---|---|
-| `douban hot` | 热门电影；加 `--tv` 查看剧集 | `--tv`、`--tag`、`--limit` |
-| `douban tv <tag>` | 按标签查看剧集 | `热门/美剧/英剧/日剧/韩剧/国产剧/综艺/最新` |
-| `douban rank <genre>` | 按类型查看高分电影 | `--limit` |
-| `douban top250` | 豆瓣电影 Top250，每页 25 条 | `--page`，支持交互翻页 |
-| `douban coming` | 即将上映 | `--limit` |
-| `douban weekly` | 一周口碑榜与排名趋势 | `--limit` |
-| `douban search <keyword>` | 搜索电影（自动复用本地登录态，见下文） | `--start`、`--limit` |
-| `douban movie <id-or-title>` | 电影/剧集详情，可直接传 ID 或片名 | `--json` |
-| `douban rating <id-or-title>` | 评分分布、想看/看过统计和类型排名 | ID 或片名 |
-| `douban comments <id-or-title>` | 热门短评 | `--page`、`--limit` |
-| `douban reviews <id-or-title>` | 热门影评 | `--page`、`--limit` |
+## 隐私
 
-类型排行支持：剧情、喜剧、动作、爱情、科幻、动画、悬疑、惊悚、恐怖、纪录片、短片、情色、同性、音乐、歌舞、家庭、儿童、传记、历史、战争、犯罪、西部、奇幻、冒险、灾难、武侠、古装、运动、黑色电影。
+- 公开查询不读取任何 Cookie。`douban login` 只读取豆瓣登录所需的 `dbcl2` / `ck`，加密保存在本机，30 天后失效，`douban logout` 立即删除。
+- 只有你运行写入命令时才会修改账号。
+- 这是非官方工具，请控制请求频率；被限流时稍后再试。
 
-```bash
-douban hot --tv --tag 英剧 --limit 10
-douban top250 --page 2
-douban search "奥本海默" --start 20 --limit 20
-douban movie 35593344
-douban movie "沙丘"
-douban rating 1291546
-douban rating 沙丘
-douban comments 1291546
-douban reviews 1291546 --limit 5
-```
-
-豆瓣对未登录的搜索限流很严。电影/图书搜索，以及用片名、书名解析条目时，CLI 会自动复用已有的本地登录态（与用户收藏相同）；没有登录态时按匿名请求，被限流会返回 `RATE_LIMITED` 并提示运行 `douban login`，不会把限流伪装成"没有结果"。完整搜索不可用而退回联想结果时，会在 stderr 给出提示。图书 ISBN 通过豆瓣的 ISBN 直达地址解析，不依赖搜索。
-
-电影详情会尽量展示中文名/原名、年份、评分、评分人数、导演、编剧、主演、类型、制片国家/地区、语言、片长、上映日期、别名、IMDb、集数、简介和评分分布。上游部分来源不可用时，CLI 会合并仍然可用的数据。
-
-## 📚 图书
-
-图书命令都是只读请求。榜单、搜索、详情、评分、短评、书评和笔记无需登录（可接受豆瓣条目 ID、ISBN 或关键词）；`book user` / `book export` 读取书单时会自动复用本地登录态，以获取当前账号可见的收藏；没有登录态时使用匿名请求，结果可能较少或被拒绝。
-
-| 命令 | 能做什么 | 常用参数 |
-|---|---|---|
-| `douban book hot` | 旧版兼容入口，等同图书 Top250 | `--start`、`--limit` |
-| `douban book top250` | 豆瓣图书 Top250 | `--start`、`--limit` |
-| `douban book chart [category]` | 当前热门图书榜，最多 20 条 | `--limit` |
-| `douban book new [category]` | 新书速递，最多 20 条 | `--limit`；别名 `latest` |
-| `douban book search <keyword>` | 按书名、作者或 ISBN 搜索 | `--start`、`--limit` |
-| `douban book info <query>` | 图书完整详情 | ID、ISBN 或关键词 |
-| `douban book rating <query>` | 五星分布与想读/在读/读过统计 | ID、ISBN 或关键词 |
-| `douban book comments <query>` | 热门短评 | `--page`、`--limit` |
-| `douban book reviews <query>` | 热门书评 | `--page`、`--limit` |
-| `douban book notes <query>` | 热门读书笔记 | `--page`、`--limit` |
-| `douban book user <userId>` | 指定用户当前可见的想读/在读/读过书单 | `--wish`、`--reading`、`--page`、`--limit` |
-| `douban book export <userId>` | 将当前可见的书单导出到文件 | `--wish`、`--reading`、`--limit`、`--output`、`--format`、`--delay` |
-
-`book chart` 和 `book new` 支持：全部、文学、小说、历史文化、社会纪实、科学新知、艺术设计、商业经管、绘本漫画。
-
-```bash
-# 榜单与发现
-douban book chart 小说 --limit 10
-douban book top250 --start 25 --limit 20
-douban book latest 科学新知
-
-# 搜索、详情与内容
-douban book search "三体" --limit 20
-douban book info 三体
-douban book info 9787536692930
-douban book rating 三体
-douban book comments 三体
-douban book reviews 三体 --limit 5
-douban book notes 三体 --limit 5
-
-# 书单（自动复用本地登录态）
-douban book user USER_ID --wish --page 2
-douban book user USER_ID --reading
-douban book export USER_ID --wish --limit 100 --delay 2 -o books.md
-douban book export USER_ID --reading -f csv -o reading.csv
-```
-
-图书详情覆盖作者、译者、出版社、出品方、出版年、页数、装帧、定价、ISBN、丛书、标签、电子书、短评/书评/笔记数量、内容简介、作者简介和目录等字段。字段来自多个公开来源，某个来源失败时仍会保留其他来源的结果。
-
-## 🗂️ 用户收藏、豆列与配置
-
-| 命令 | 能做什么 | 登录要求 |
-|---|---|---|
-| `douban user <userId>` | 指定用户的电影看过/想看/在看 | 自动复用本地登录态；默认看过，使用 `--wish` 或 `--doing` 切换 |
-| `douban book user <userId>` | 指定用户当前可见的图书读过/想读/在读 | 自动复用本地登录态；默认读过，使用 `--wish` 或 `--reading` 切换 |
-| `douban config` | 查看本地配置；`--user <id>` 设置 `me` 的默认用户 | 无需登录 |
-| `douban me` | 默认用户或当前登录账号的电影收藏 | 有默认用户时自动复用本地登录态、无登录态则匿名读取；否则先验证登录账号 |
-| `douban list` | 热门豆列推荐 | 无需登录 |
-
-```bash
-douban user USER_ID
-douban user USER_ID --wish --page 2
-douban user USER_ID --doing
-
-douban config --user USER_ID
-douban config
-douban me --wish
-douban list --limit 10
-```
-
-## 🔐 登录、个人数据与账号操作
-
-首次使用账号功能时运行：
-
-```bash
-douban login
-douban whoami
-```
-
-`login` 默认不会启动浏览器。它会识别系统默认浏览器，说明即将读取的来源，并在你确认后只读取一次豆瓣所需的 `dbcl2` / `ck` Cookie。浏览器已有登录态时无需再次输入账号密码；尚未登录时可加 `--open` 打开当前账号页。多浏览器或多账号环境可以明确选择来源：
-
-```bash
-douban login --browser arc
-douban login --open
-douban login --browser chrome --profile "Profile 2"
-douban login --browser chrome --cookie-timeout 120
-```
-
-未传 `--browser` 时，CLI 会识别系统 HTTPS 默认浏览器，只从同一个来源读取 Cookie，避免扫描多个浏览器和重复触发钥匙串授权。只有显式传入 `--open` 才会启动该浏览器并打开豆瓣当前账号页；这个窗口只是登录入口，最终保存哪个账号以 Cookie 验证结果为准。`--open` 不能与 `--profile` 同用：需要指定 profile 时，请先手动打开该 profile，再运行不带 `--open` 的登录命令。`--browser` 支持 Chrome、Edge、Firefox、Safari 和 Arc，其中 Safari 与 Arc 仅支持 macOS。`--profile` 必须与 `--browser` 一起使用，Safari 不支持指定 profile。浏览器 Cookie 和系统钥匙串默认等待 60 秒，可用 `--cookie-timeout` 调整为 1-300 秒。浏览器模式需要交互式终端，不能通过管道或 CI 启动。macOS 首次读取 Chromium 浏览器登录态时可能弹出 Safe Storage 授权，请选择允许。
-
-浏览器提取不可用时，可以显式选择一种手动导入方式：
-
-```bash
-# macOS：先在浏览器开发者工具中复制单行 Cookie 请求头
-pbpaste | douban login --cookie-stdin
-
-# Windows PowerShell
-Get-Clipboard | douban login --cookie-stdin
-
-# 浏览器扩展导出的 Netscape cookies.txt
-douban login --cookie-file /path/to/douban-cookies.txt
-```
-
-`--cookie-stdin` 只接受非交互式标准输入中的单行 Cookie 请求头，可带 `Cookie:` 前缀和一个末尾换行；`--cookie-file` 只接受普通的 Netscape `cookies.txt` 文件。两者互斥，也不能与浏览器登录参数混用。CLI 只保留 `dbcl2` / `ck`，验证对应豆瓣账号后才写入加密缓存；即使浏览器提取失败，也不会自动读取标准输入、文件、剪贴板或环境变量。不要把 Cookie 放进命令行参数、环境变量、聊天、Issue 或日志；导入文件本身也是登录凭据，使用后应妥善删除或限制访问。`login --json` 只输出来源和账号信息，不输出或遮罩展示任何 Cookie。
-
-登录缓存会加密保存在本地，账号写操作前会重新核对身份。
-
-### 标记、评分、短评与标签（电影和图书）
-
-以下操作会修改当前豆瓣账号。电影命令在根目录，图书命令在 `book` 下，用法一致：
-
-```bash
-douban mark 1292052 --wish                  # 电影：--wish / --watched / --watching
-douban book mark 2567698 --read             # 图书：--wish / --read / --reading
-douban rate 1292052 --score 5
-douban book comment 2567698 "值得重读" --tags 科幻,经典 --private
-douban record 1292052                       # 查看自己对该条目的状态、评分、短评、标签和可见性
-douban book unmark 2567698 --dry-run        # 先预览，确认后去掉 --dry-run
-douban review 1292052 "标题" --file review.md  # 长评（仅电影）
-```
-
-- 每次写入都会先读取当前记录，只修改你指定的字段，提交后再读回核对；评分、短评、标签和“仅自己可见”不会被意外清空，也从不勾选“分享到广播”。
-- `--dry-run` 只显示修改前后的对比，不提交。`--tags` 覆盖原有标签；`--private` / `--public` 切换可见性。
-- `rate` 会把条目标为看过/读过；`comment` 保留原状态，未标记时标为看过/读过；`unmark` 会删除整条记录（含评分、短评、标签）。
-- 写入失败不会自动重试；读回结果与预期不一致时会报错并提示用 `record` 核对。
-
-### 统计、导出与关注
-
-```bash
-douban stats --year 2026 --limit 30 --delay 2
-douban export --format json -o douban-export.json
-douban export --format csv -o douban-export.csv
-
-douban follow USER_ID
-douban unfollow USER_ID
-douban logout
-```
-
-`stats` 默认基于最近最多 1000 条“看过”记录统计总数、月份分布和平均分，因此较早年份可能不完整；可用 `--limit` 调整读取量。`stats`、账号 `export` 和 `book export` 默认在分页请求之间等待 1 秒，可用 `--delay` 调整。账号 `export --delay` 同时用于同一状态的分页和看过/想看/在看三种状态之间；其 `--limit` 分别应用于三种状态，总条数最多可能接近 `3 × limit`。
-
-## 📦 两种导出
-
-| 命令 | 数据 | 登录 | 格式 | 说明 |
-|---|---|---|---|---|
-| `douban book export <userId>` | 指定用户在当前登录状态下可见的想读/在读/读过 | 自动复用；无登录态则匿名读取 | Markdown、CSV、JSON | 必须指定 `--output`；未传 `--format` 时按扩展名推断；最多 5000 条；`--delay` 控制分页间隔 |
-| `douban export` | 当前账号的电影看过/想看/在看 | 需要 | CSV、JSON | 必须指定 `--output`；可能包含评分、短评和用户信息；`--delay` 控制分页和状态切换间隔 |
-
-登录后导出自己的书单可能包含匿名访问时不可见的条目，分享文件前请检查内容。
-
-两种导出在后续页面请求失败时都会保留已经取得的数据，并通过 stderr 明确告警。JSON 文件还会写入 `metadata.partial` 和 `metadata.warnings`；CSV/Markdown 会在完成提示中标明结果可能不完整。
-
-## 🧰 批量操作
-
-电影和图书的标记、取消标记、评分和短评都支持 `--file`。默认在每次写入之间随机等待 1–2 秒，也可以通过 `--delay` 指定固定间隔。
-
-```bash
-douban mark --file ids.txt --wish
-douban unmark --file ids.txt --delay 1.5
-douban rate --file ratings.csv
-douban comment --file comments.tsv --delay 1.5
-```
-
-文件格式：
-
-- `mark` / `unmark`：每行一个电影 ID。
-- `rate`：每行 `<id>,<score>`，`score` 为 1–5。
-- `comment`：每行 `<id>,<comment>`，逗号或制表符分隔。
-- 空行和以 `#` 开头的注释会被忽略。
-
-批量任务会逐项继续执行；如果部分条目失败，结果会同时给出成功和失败明细，并以非零退出码结束。
-
-## 🤖 JSON 输出与脚本化
-
-除两个文件导出命令外，所有操作命令都支持 `--json`：
-
-```bash
-douban weekly --json
-douban book info 三体 --json
-douban user USER_ID --wish --json
-douban whoami --json
-```
-
-- `--json` 将命令结果写到 stdout；失败时向 stderr 写结构化 JSON，并返回非零退出码。错误码包括 `INVALID_ARGUMENT`、`NOT_FOUND`、`AUTH_REQUIRED`、`RATE_LIMITED`、`HTTP_ERROR`、`NETWORK_ERROR` 等。
-- 结果可能不完整时，提示写到 stderr（以 `⚠️` 开头），stdout 的 JSON 保持可解析。
-- `export --format json` 与 `book export --format json` 是文件格式选项，不会把 JSON 打到 stdout。
-- 需要稳定脚本行为时，以具体命令的 `--help` 和 JSON 字段为准，不要解析人类可读表格。
-
-## ⌨️ 交互翻页
-
-以下命令在交互终端中支持翻页：
-
-- 电影：`top250`、`comments`、`reviews`、`user`。
-- 图书：`book comments`、`book reviews`、`book notes`、`book user`。
-
-按回车或 `n` 下一页，`p` 上一页，`g <页码>` 跳转，`q` 退出。已经访问过的页面会在本次会话中复用。
-
-使用 `--json`、管道或重定向时不会进入交互模式，只返回 `--page` 指定的页面。`search`、`book search` 和 `book top250` 使用 `--start` 偏移量，不使用交互分页。
-
-电影和图书 Top250 在桌面网页不可用时会回退到豆瓣公开移动榜单，保持原有的分页参数；触发 HTTP 429 限流时会停止，不会通过切换数据源继续请求。
-
-## 🛡️ 登录与隐私
-
-- 公开只读命令不会隐式读取浏览器 Cookie。浏览器登录只在显式运行 `douban login` 时发生；手动导入只在显式传入 `--cookie-stdin` 或 `--cookie-file` 时发生，浏览器失败不会自动切换来源。
-- CLI 不接受包含 Cookie 内容的命令行参数或环境变量，也不会自行读取剪贴板。Netscape `cookies.txt` 属于敏感登录凭据，不要提交到 Git、上传到公开服务或长期保留。
-- 登录缓存使用 AES-256-GCM 加密、文件权限 `0600`，应用目录权限为 `0700`，并按缓存内的 `updatedAt` 在 30 天后失效；`douban logout` 会删除本地缓存，不会退出浏览器中的豆瓣账号。
-- macOS 将登录缓存和配置保存在 `~/Library/Application Support/douban-cli/`；Linux 分别使用 `$XDG_STATE_HOME/douban-cli/` 和 `$XDG_CONFIG_HOME/douban-cli/`（未设置时使用标准默认目录）；Windows 分别使用 `%LOCALAPPDATA%\douban-cli\` 和 `%APPDATA%\douban-cli\`。
-- 可将 `DOUBAN_CLI_HOME` 设为绝对路径，让登录缓存和配置统一存放到指定目录。旧的 `~/.douban-cli-auth.json` 与 `~/.douban-cli.json` 会在验证迁移结果后自动删除。
-- 多浏览器登录不同账号时，请使用 `--browser` 和 `--profile` 明确选择，避免操作错误账号。
-- 导出文件可能包含用户 ID、收藏、评分和短评。请保存到合适的位置，不要误提交到 Git 或上传到公开服务。
-
-## 🩺 排查问题
-
-先查看根命令或子命令帮助：
-
-```bash
-douban --help
-douban book --help
-douban book comments --help
-```
-
-需要排查网络、解析或登录问题时，可以临时启用调试日志：
-
-```bash
-DOUBAN_DEBUG=1 douban book info 三体
-```
-
-豆瓣页面可能出现限流、验证码或结构变化。CLI 会对只读 GET 请求进行有限重试，并尽量返回已经取得的 partial results；如果页面结构无法可靠识别，会明确报错而不是把解析失败伪装成空列表。遇到安全验证请暂停请求；服务端的 `Retry-After` 超出自动等待上限时，CLI 会停止自动重试，不会缩短服务端要求的等待时间。
-
-## 🧪 开发
+## 开发
 
 ```bash
 npm ci
-npm run verify
+npm run verify   # lint、类型检查、单元测试、构建和 CLI 冒烟测试
 ```
 
-`npm run verify` 会依次执行 lint、源代码与测试类型检查、单元测试、构建和 CLI smoke tests。
+代码结构与约定见 [AGENTS.md](AGENTS.md)。
 
 ## License
 
