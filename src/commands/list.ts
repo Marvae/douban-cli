@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { getDoulist, getHotLists } from '../api/list.js';
 import { printWarnings, withErrorHandler } from '../utils/error.js';
 import { parseNonNegativeInt, parsePositiveIntAtMost } from '../utils/parsing.js';
-import { withSpinner } from '../utils/spinner.js';
+import { withSpinner } from '../ui/spinner.js';
 
 const KIND_LABELS = { movie: '电影', book: '图书', music: '音乐', other: '其他' } as const;
 const MAX_DOULIST_ITEMS = 1000;

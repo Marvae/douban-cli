@@ -41,7 +41,7 @@ export interface RecordWriteOptions {
   ck?: string;
 }
 
-export const MAX_COMMENT_LENGTH = 350;
+const MAX_COMMENT_LENGTH = 350;
 
 interface RecordForm {
   record: SubjectRecord;
@@ -140,7 +140,7 @@ export async function getSubjectRecord(kind: SubjectActionKind, id: string, cook
   return (await readRecordForm(kind, id, cookies)).record;
 }
 
-export function applyRecordPatch(before: SubjectRecord, patch: RecordPatch): SubjectRecord {
+function applyRecordPatch(before: SubjectRecord, patch: RecordPatch): SubjectRecord {
   if (patch.rating != null && !(Number.isInteger(patch.rating) && patch.rating >= 1 && patch.rating <= 5)) {
     throw new Error('评分必须是 1-5 的整数');
   }

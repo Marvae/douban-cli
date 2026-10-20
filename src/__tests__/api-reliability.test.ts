@@ -1,9 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getBookChart, getBookTop250, getLatestBooks, searchBooks } from '../api/book.ts';
+import { getBookChart, getBookTop250, getLatestBooks } from '../api/book.ts';
 import { getUserCollectionPage } from '../api/collection.ts';
 import { getHot, getMovieDetail, getRank, getTop250 } from '../api/movie.ts';
-import { parseMovieSearchPage, searchMovies } from '../api/search.ts';
 import { getSubjectComments, getSubjectRatingStats, getSubjectReviews } from '../api/subject.ts';
 
 afterEach(() => {
@@ -11,90 +10,22 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function searchHtml(start: number, total: number, kind: 'movie' | 'book', count = 15): string {
-  return `<script>window.__DATA__ = ${JSON.stringify({
-    start,
-    count,
-    total,
-    items: Array.from({ length: Math.min(count, Math.max(0, total - start)) }, (_, index) => {
-      const id = start + index + 1;
-      return {
-        tpl_name: 'search_subject',
-        id,
-        title: `${kind} ${id}`,
-        url: `https://${kind}.douban.com/subject/${id}/`,
-        abstract: `2026 / item ${id}`,
-        rating: { value: 8.5 }
-      };
-    })
-  })};</script>`;
-}
-
 function htmlResponse(html: string, status = 200): Response {
   return new Response(html, { status, headers: { 'Content-Type': 'text/html' } });
 }
 
-describe('search reliability', () => {
-  it('rejects malformed movie search pagination metadata', () => {
-    const html = '<script>window.__DATA__ = {"start":0,"count":null,"total":1,"items":[]};</script>';
-    expect(() => parseMovieSearchPage(html)).toThrow('count 不是非负整数');
-  });
-
-  it('uses HTML movie search as the primary path and aggregates pages', async () => {
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.includes('/j/subject_suggest')) {
-        return Response.json([{ id: '1', title: 'movie 1', year: '2026', type: 'movie' }]);
-      }
-      const start = Number(new URL(url).searchParams.get('start') || 0);
-      return htmlResponse(searchHtml(start, 40, 'movie'));
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const items = await searchMovies('测试', 0, 40);
-
-    expect(items).toHaveLength(40);
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('www.douban.com/j/search'))).toBe(false);
-  });
-
-  it('keeps successful movie pages when a later page fails', async () => {
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.includes('/j/subject_suggest')) return Response.json([]);
-      const start = Number(new URL(url).searchParams.get('start') || 0);
-      return start === 0 ? htmlResponse(searchHtml(0, 40, 'movie')) : htmlResponse('failed', 403);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(searchMovies('测试', 0, 30)).resolves.toHaveLength(15);
-  });
-
-  it('keeps successful book pages when a later page fails', async () => {
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      const start = Number(new URL(url).searchParams.get('start') || 0);
-      return start === 0 ? htmlResponse(searchHtml(0, 40, 'book')) : htmlResponse('failed', 403);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(searchBooks('测试', 0, 30)).resolves.toHaveLength(15);
-  });
-
+describe('movie and book sources', () => {
   it('makes single-page book chart limits explicit', async () => {
     await expect(getBookChart('全部', 21)).rejects.toThrow('最多返回 20 条');
     await expect(getLatestBooks('全部', 50)).rejects.toThrow('最多返回 20 条');
   });
-});
 
-describe('movie source orchestration', () => {
-  it.each(['movie', 'book'] as const)('uses public mobile %s Top250 pagination after a desktop challenge', async (kind) => {
+  it.each(['movie', 'book'] as const)('reads %s Top250 from the mobile collection, 50 per request', async (kind) => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));
-      if (url.hostname !== 'm.douban.com') {
-        return htmlResponse('<form name="sec" id="sec">安全验证</form>');
-      }
       const start = Number(url.searchParams.get('start'));
-      return Response.json({ start, subject_collection_items: Array.from({ length: 25 }, (_, index) => ({
+      const count = Number(url.searchParams.get('count'));
+      return Response.json({ start, total: 250, subject_collection_items: Array.from({ length: count }, (_, index) => ({
         id: String(start + index + 1), title: `Item ${start + index + 1}`,
         rank: start + index + 1, rating: { value: 9.1, count: 100 },
         card_subtitle: '2026 / 中国 / 剧情 / 导演 / 演员'
@@ -102,16 +33,20 @@ describe('movie source orchestration', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const items = await (kind === 'movie' ? getTop250(0, 30) : getBookTop250(0, 30));
+    const items = await (kind === 'movie' ? getTop250(0, 60) : getBookTop250(0, 60));
 
-    expect(items).toHaveLength(30);
+    expect(items).toHaveLength(60);
     expect(items[0]).toMatchObject({ rank: 1, title: 'Item 1', rating: '9.1' });
-    expect(items[29]).toMatchObject({ rank: 30, title: 'Item 30' });
-    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).hostname))
-      .toEqual([`${kind}.douban.com`, 'm.douban.com', 'm.douban.com']);
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).search))
+      .toEqual(['?start=0&count=50', '?start=50&count=10']);
   });
 
-  it.each(['movie', 'book'] as const)('does not switch %s Top250 sources during a rate-limit cooldown', async (kind) => {
+  it('rejects an empty collection page that claims more items', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ start: 0, total: 250, subject_collection_items: [] })));
+    await expect(getTop250(0, 10)).rejects.toMatchObject({ code: 'SCHEMA_MISMATCH' });
+  });
+
+  it.each(['movie', 'book'] as const)('stops %s Top250 at a long rate-limit cooldown instead of retrying', async (kind) => {
     const fetchMock = vi.fn(async () => new Response('busy', { status: 429, headers: { 'Retry-After': '120' } }));
     vi.stubGlobal('fetch', fetchMock);
     await expect(kind === 'movie' ? getTop250() : getBookTop250()).rejects.toMatchObject({ status: 429 });
@@ -130,41 +65,29 @@ describe('movie source orchestration', () => {
     await expect(getRank(17)).rejects.toMatchObject({ code: 'SCHEMA_MISMATCH' });
   });
 
-  it('stops Top250 pagination when the upstream page makes no progress', async () => {
-    const items = Array.from({ length: 25 }, (_, index) => `
-      <div class="item">
-        <em>${index + 1}</em>
-        <a href="https://movie.douban.com/subject/${index + 1}/"><span class="title">电影 ${index + 1}</span></a>
-        <span class="rating_num">8.0</span>
-      </div>`).join('');
-    const fetchMock = vi.fn(async () => htmlResponse(items));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(getTop250(0, 30)).resolves.toHaveLength(25);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('merges concurrent sources without requesting TV data for a movie', async () => {
+  it('builds movie detail from the mobile API and asks the TV endpoint only for series', async () => {
     const requested: string[] = [];
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
-      requested.push(url);
-      if (url.includes('/j/subject_abstract')) {
-        return Response.json({ subject: { title: '测试电影', year: '2026', directors: ['导演甲'] } });
+      requested.push(new URL(url).pathname);
+      if (url.includes('/recommendations')) return Response.json([]);
+      if (url.includes('/movie/123')) {
+        return Response.json({ type: 'movie', title: '测试电影', year: '2026', intro: '简介', rating: { value: 8.8 }, directors: [{ name: '导演甲' }] });
       }
-      if (url.includes('/rexxar/api/v2/movie/123')) {
-        return Response.json({ type: 'movie', title: '测试电影', intro: '简介', rating: { value: 8.8 } });
-      }
+      if (url.includes('/movie/456')) return Response.json({ type: 'tv', title: '测试剧集', rating: { value: 0 } });
+      if (url.includes('/tv/456')) return Response.json({ episodes_count: 12 });
       return htmlResponse('forbidden', 403);
+    }));
+
+    await expect(getMovieDetail('123')).resolves.toMatchObject({
+      title: '测试电影', type: 'movie', year: '2026', rating: '8.8', summary: '简介', directors: ['导演甲']
     });
-    vi.stubGlobal('fetch', fetchMock);
+    expect(requested.sort()).toEqual(['/rexxar/api/v2/movie/123', '/rexxar/api/v2/movie/123/recommendations']);
 
-    const detail = await getMovieDetail('123');
-
-    expect(detail).toMatchObject({ title: '测试电影', year: '2026', rating: '8.8', summary: '简介' });
-    expect(requested.some((url) => url.includes('/rexxar/api/v2/tv/'))).toBe(false);
+    requested.length = 0;
+    await expect(getMovieDetail('456')).resolves.toMatchObject({ type: 'tv', rating: '-', episodes_count: 12 });
+    expect(requested).toContain('/rexxar/api/v2/tv/456');
   });
-
 });
 
 describe('partial rating and collection data', () => {

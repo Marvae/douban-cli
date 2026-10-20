@@ -43,3 +43,17 @@ export function getDisplayWidth(text: string): number {
 export function padDisplayEnd(text: string, width: number): string {
   return text + ' '.repeat(Math.max(0, width - getDisplayWidth(text)));
 }
+
+/** Cut text to a terminal column width, ending with "…" when shortened. */
+export function truncateDisplay(text: string, maxWidth: number): string {
+  if (getDisplayWidth(text) <= maxWidth) return text;
+  let result = '';
+  let width = 0;
+  for (const char of text) {
+    const charWidth = getDisplayWidth(char);
+    if (width + charWidth > maxWidth - 1) break;
+    result += char;
+    width += charWidth;
+  }
+  return `${result}…`;
+}

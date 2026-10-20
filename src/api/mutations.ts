@@ -288,7 +288,7 @@ function extractCkFromHtml(html: string): string {
   throw new Error('无法解析 ck token，请重新登录后重试');
 }
 
-export async function resolveCk(
+async function resolveCk(
   cookies: string,
   existingCk?: string,
   subjectId?: string,

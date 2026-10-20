@@ -1,5 +1,5 @@
-import { detectAuthSession } from '../auth.js';
-import { getDisplayWidth, padDisplayEnd } from '../utils/text.js';
+import { detectAuthSession } from '../auth/index.js';
+import { getDisplayWidth, padDisplayEnd } from '../ui/text.js';
 
 const COMMON_COMMANDS: Array<[string, string]> = [
   ['douban now', '正在热映'],

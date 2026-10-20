@@ -5,7 +5,9 @@ import { registerBookCommands } from './commands/book.js';
 
 import { registerListCommands } from './commands/list.js';
 import { registerMovieCommands } from './commands/movie.js';
-import { registerUserCommands } from './commands/user.js';
+import { registerCollectionCommands } from './commands/collection.js';
+import { registerConfigCommand } from './commands/config.js';
+import { registerExportCommands } from './commands/export.js';
 import { registerMarkCommands } from './commands/mark.js';
 import { registerAuthCommands } from './commands/auth.js';
 import { registerSocialCommands } from './commands/social.js';
@@ -39,10 +41,12 @@ program
 // Registration order sets the order of the help groups.
 registerMovieCommands(program);
 const bookCommand = registerBookCommands(program);
-registerUserCommands(program);
+registerCollectionCommands(program, bookCommand);
+registerConfigCommand(program);
 registerListCommands(program);
 registerAuthCommands(program);
 registerMarkCommands(program, bookCommand);
+registerExportCommands(program, bookCommand);
 registerSocialCommands(program);
 registerDoctorCommand(program);
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getCollectionRecords, getCurrentUserProfile, getUserCollectionPageWithSession } from '../api/account.ts';
+import { getCurrentUserProfile } from '../api/account.ts';
+import { getCollectionRecords, getUserCollectionPageWithSession } from '../api/collection.ts';
 import { getUserCollectionPage } from '../api/collection.ts';
 
 afterEach(() => {

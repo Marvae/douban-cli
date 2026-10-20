@@ -31,11 +31,11 @@ it('public getUserCollectionPage stays anonymous even with a cached CLI session'
     { headers: { 'Content-Type': 'text/html' } }
   ));
   vi.stubGlobal('fetch', fetchMock);
-  const auth = await import('../auth.ts');
+  const auth = await import('../auth/index.ts');
   await auth.loginFromCookieStdin(Readable.from(['dbcl2=REVIEW_FAKE_ACCOUNT; ck=REVIEW_FAKE_CSRF']));
   fetchMock.mockClear();
   fetchMock.mockImplementation(async () => new Response(fixture, { headers: { 'Content-Type': 'text/html' } }));
-  const api = await import('../api/index.ts');
+  const api = await import('../api/collection.ts');
   const page = await api.getUserCollectionPage({ kind: 'movie', userId: 'someone-else', status: 'collect', start: 0, count: 2 });
   expect(page.items).toHaveLength(2);
   expect(fetchMock).toHaveBeenCalledOnce();
@@ -50,7 +50,7 @@ it('public getUserCollectionPage does not modify a malformed CLI auth cache', as
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(fixture, {
     headers: { 'Content-Type': 'text/html' }
   })));
-  const api = await import('../api/index.ts');
+  const api = await import('../api/collection.ts');
   await api.getUserCollectionPage({ kind: 'movie', userId: 'someone-else', status: 'collect', start: 0, count: 2 });
   expect(existsSync(cache)).toBe(true);
 });

@@ -8,10 +8,10 @@ const mocks = vi.hoisted(() => ({
   sleep: vi.fn()
 }));
 
-vi.mock('../auth.js', () => ({
+vi.mock('../auth/index.js', () => ({
   ensureAuth: mocks.ensureAuth
 }));
-vi.mock('../api/account.js', () => ({
+vi.mock('../api/collection.js', () => ({
   getCollectionRecords: mocks.getCollectionRecords
 }));
 vi.mock('../api/mutations.js', () => ({
@@ -22,7 +22,7 @@ vi.mock('../api/mutations.js', () => ({
 vi.mock('../storage/secure-file.js', () => ({
   secureAtomicWriteFile: mocks.secureAtomicWriteFile
 }));
-vi.mock('../utils/spinner.js', () => ({
+vi.mock('../ui/spinner.js', () => ({
   withSpinner: vi.fn(async (_message: string, task: () => Promise<unknown>) => task())
 }));
 vi.mock('../utils/timing.js', () => ({
@@ -32,7 +32,7 @@ vi.mock('../utils/timing.js', () => ({
   sleep: mocks.sleep
 }));
 
-import { registerSocialCommands } from '../commands/social.ts';
+import { registerExportCommands } from '../commands/export.ts';
 
 function verifiedSession() {
   return {
@@ -48,7 +48,7 @@ function verifiedSession() {
 function createProgram(): Command {
   const program = new Command();
   program.exitOverride();
-  registerSocialCommands(program);
+  registerExportCommands(program, program.command('book'));
   return program;
 }
 
@@ -58,7 +58,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('social commands', () => {
+describe('stats and export commands', () => {
   it('uses the verified session identity for stats', async () => {
     mocks.ensureAuth.mockResolvedValue(verifiedSession());
     mocks.getCollectionRecords.mockResolvedValue({ records: [], partial: false, warnings: [] });
@@ -130,7 +130,7 @@ describe('social commands', () => {
       partial: true,
       warnings: ['第二页获取失败']
     });
-    expect(stderr.mock.calls.flat().join('\n')).toContain('统计数据可能不完整：第二页获取失败');
+    expect(stderr.mock.calls.flat().join('\n')).toContain('⚠️ 第二页获取失败');
   });
 
   it('uses the verified session identity for all export collections', async () => {
@@ -196,7 +196,7 @@ describe('social commands', () => {
       partial: true,
       warnings: ['想看：第二页获取失败']
     });
-    expect(stderr.mock.calls.flat().join('\n')).toContain('导出数据可能不完整：想看：第二页获取失败');
+    expect(stderr.mock.calls.flat().join('\n')).toContain('⚠️ 想看：第二页获取失败');
     const completion = stdout.mock.calls.flat().join('\n');
     expect(completion).toContain('结果可能不完整');
     expect(completion).not.toContain('✅');

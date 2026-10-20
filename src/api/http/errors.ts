@@ -4,7 +4,6 @@ export type HttpErrorCode =
   | 'CONTENT_TYPE'
   | 'REDIRECT'
   | 'CHALLENGE'
-  | 'RATE_LIMITED'
   | 'AUTH_REQUIRED'
   | 'INVALID_JSON'
   | 'SCHEMA_MISMATCH';

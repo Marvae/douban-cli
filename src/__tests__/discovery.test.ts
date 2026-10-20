@@ -1,32 +1,36 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { parseDoulistId, parseDoulistPage } from '../api/list.ts';
+import { getDoulist, parseDoulistId } from '../api/list.ts';
 import { getNowShowing } from '../api/movie.ts';
-import { parseSubjectRecommendations } from '../api/subject.ts';
+import { parseSubjectRecommendations, resolveRecommendations } from '../api/subject.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('discovery', () => {
-  it('parses doulist entries, kinds and the next page cursor', () => {
-    const item = (pos: number, url: string, title: string, rating = '') => `
-      <div id="${pos}" class="doulist-item"><span class="pos">${pos}</span>
-        <div class="title"><a href="${url}">${title}</a></div>
-        ${rating ? `<span class="rating_nums">${rating}</span>` : ''}
-        <div class="abstract">导演: 某人 <br /> 年份: 1994</div></div>`;
-    const html = `<h1><span>高分榜</span></h1><div class="doulist-about">说明<br/>第二行</div>
-      ${item(1, 'https://movie.douban.com/subject/1292052/', '肖申克的救赎', '9.7')}
-      ${item(2, 'https://book.douban.com/subject/2567698/', '三体')}
-      <span class="next"><a href="https://www.douban.com/doulist/240962/?start=25&amp;sort=seq">后页</a></span>`;
+  it('reads a doulist across pages and reports where a failed read can resume', async () => {
+    const entry = (n: number, type: string) => ({
+      target_id: String(n), type, title: `条目 ${n}`, url: `https://www.douban.com/x/${n}/`,
+      rating: { value: type === 'movie' ? 9.7 : 0 }, subtitle: '1994 / 美国'
+    });
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/240962')) return Response.json({ title: '高分榜', desc: '说明\n\n第二行' });
+      const start = Number(url.searchParams.get('start'));
+      if (start === 0) return Response.json({ total: 5, items: [entry(1, 'movie'), entry(2, 'tv'), entry(3, 'note')] });
+      return new Response('busy', { status: 403 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
-    const page = parseDoulistPage(html, 'https://www.douban.com/doulist/240962/');
+    const list = await getDoulist('https://www.douban.com/doulist/240962/', { limit: 5, delayMs: 0 });
 
-    expect(page).toMatchObject({ title: '高分榜', description: '说明 第二行', nextStart: 25 });
-    expect(page.items).toEqual([
-      expect.objectContaining({ position: 1, id: '1292052', kind: 'movie', rating: '9.7', abstract: '导演: 某人 / 年份: 1994' }),
-      expect.objectContaining({ position: 2, id: '2567698', kind: 'book', rating: '-' })
+    expect(list).toMatchObject({ id: '240962', title: '高分榜', description: '说明 第二行', next_start: 3, partial: true });
+    expect(list.items).toEqual([
+      expect.objectContaining({ position: 1, id: '1', kind: 'movie', rating: '9.7', abstract: '1994 / 美国' }),
+      expect.objectContaining({ position: 2, id: '2', kind: 'movie', rating: '-' }),
+      expect.objectContaining({ position: 3, id: '', kind: 'other' })
     ]);
-    expect(parseDoulistId('https://www.douban.com/doulist/240962/')).toBe('240962');
+    expect(parseDoulistId('240962')).toBe('240962');
     expect(() => parseDoulistId('https://evil.example/doulist/1/')).toThrow('豆列必须是');
   });
 
@@ -42,6 +46,23 @@ describe('discovery', () => {
     ]);
     expect(parseSubjectRecommendations(book, 'book').map((item) => item.title)).toEqual(['三体Ⅲ']);
     expect(parseSubjectRecommendations('<html></html>', 'book')).toEqual([]);
+  });
+
+  it('asks the mobile API for recommendations only when the page has none', async () => {
+    const fetchMock = vi.fn(async () => Response.json([
+      { id: '1292720', title: '阿甘正传', rating: { value: 9.5 } },
+      { id: 'bad', title: '无效条目' }
+    ]));
+    vi.stubGlobal('fetch', fetchMock);
+    const fromPage = [{ id: '1', title: '页面推荐', rating: '9.0', url: 'https://movie.douban.com/subject/1/' }];
+
+    await expect(resolveRecommendations('movie', '1292052', fromPage)).resolves.toBe(fromPage);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(resolveRecommendations('movie', '1292052', [])).resolves.toEqual([
+      { id: '1292720', title: '阿甘正传', rating: '9.5', url: 'https://movie.douban.com/subject/1292720/' }
+    ]);
+    fetchMock.mockResolvedValueOnce(Response.json({ msg: 'unexpected' }));
+    await expect(resolveRecommendations('book', '2567698', undefined)).resolves.toEqual([]);
   });
 
   it('maps the mobile now-showing collection', async () => {

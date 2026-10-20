@@ -1,4 +1,5 @@
-import { BOOK_BASE, BASE, cleanText, fetchHtml, ResponseSchemaError } from './common.js';
+import { BOOK_BASE, BASE, cleanText, fetchHtml, HttpRequestError, ResponseSchemaError, STALE_SESSION_WARNING } from './common.js';
+import { debug } from '../utils/debug.js';
 import { sleep } from '../utils/timing.js';
 
 export type CollectionKind = 'movie' | 'book';
@@ -236,7 +237,7 @@ function parseCollectionTotal(html: string): { total?: number; expectedCount?: n
   };
 }
 
-export function parseUserCollectionPageHtml(
+function parseUserCollectionPageHtml(
   html: string,
   kind: CollectionKind,
   pageUrl: string
@@ -391,11 +392,93 @@ export function getUserCollectionPage(options: UserCollectionPageOptions): Promi
   return loadUserCollectionPage(options);
 }
 
-export function loadAuthenticatedUserCollectionPage(
+function loadAuthenticatedUserCollectionPage(
   options: UserCollectionPageOptions,
   cookies: string
 ): Promise<UserCollectionPage> {
   const cookieHeader = cookies.trim();
   if (!cookieHeader) throw new Error('登录 Cookie 不能为空');
   return loadUserCollectionPage(options, cookieHeader);
+}
+
+/**
+ * Read with an explicitly supplied session, retaining anonymous access when it
+ * is absent or rejected.
+ */
+export async function getUserCollectionPageWithSession(
+  options: UserCollectionPageOptions,
+  cookies?: string
+): Promise<UserCollectionPage> {
+  const cookieHeader = cookies?.trim();
+  if (!cookieHeader) return getUserCollectionPage(options);
+  try {
+    return await loadAuthenticatedUserCollectionPage(options, cookieHeader);
+  } catch (error) {
+    if (!(error instanceof HttpRequestError && error.code === 'AUTH_REQUIRED')) throw error;
+    const page = await getUserCollectionPage(options);
+    return { ...page, warnings: [STALE_SESSION_WARNING, ...page.warnings] };
+  }
+}
+
+export interface CollectionRecord {
+  id: string;
+  title: string;
+  url: string;
+  status: CollectionStatus;
+  date?: string;
+  rating?: number;
+  comment?: string;
+}
+
+export interface CollectionRecordLoadOptions {
+  pageDelayMs?: number;
+  onProgress?: (fetched: number) => void;
+}
+
+export interface CollectionRecordResult {
+  records: CollectionRecord[];
+  partial: boolean;
+  warnings: string[];
+}
+
+export async function getCollectionRecords(
+  userId: string,
+  status: CollectionStatus,
+  limit: number,
+  cookies: string,
+  options: CollectionRecordLoadOptions = {}
+): Promise<CollectionRecordResult> {
+  const id = userId.trim();
+  if (!id) throw new Error('用户 ID 不能为空');
+  if (!Number.isInteger(limit) || limit <= 0) {
+    return { records: [], partial: false, warnings: [] };
+  }
+
+  const page = await loadAuthenticatedUserCollectionPage({
+    kind: 'movie',
+    userId: id,
+    status,
+    start: 0,
+    count: limit,
+    pageDelayMs: options.pageDelayMs,
+    onProgress: options.onProgress
+  }, cookies);
+  const { warnings } = page;
+  if (warnings.length > 0) {
+    debug('account', `用户收藏仅返回部分结果: ${warnings.join('; ')}`);
+  }
+
+  return {
+    records: page.items.map((item) => ({
+      id: item.id,
+      title: item.title,
+      url: item.url,
+      status,
+      date: item.date || undefined,
+      rating: item.rating > 0 ? item.rating : undefined,
+      comment: item.comment || undefined
+    })),
+    partial: page.partial,
+    warnings
+  };
 }

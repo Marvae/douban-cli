@@ -1,31 +1,5 @@
 import { debug } from '../utils/debug.js';
-import { cleanText, fetchHtml, fetchHtmlPage, HttpRequestError, STALE_SESSION_WARNING } from './common.js';
-import {
-  getUserCollectionPage,
-  loadAuthenticatedUserCollectionPage,
-  type CollectionStatus,
-  type UserCollectionPage,
-  type UserCollectionPageOptions
-} from './collection.js';
-
-/**
- * Read with an explicitly supplied session, retaining anonymous access when it
- * is absent or rejected.
- */
-export async function getUserCollectionPageWithSession(
-  options: UserCollectionPageOptions,
-  cookies?: string
-): Promise<UserCollectionPage> {
-  const cookieHeader = cookies?.trim();
-  if (!cookieHeader) return getUserCollectionPage(options);
-  try {
-    return await loadAuthenticatedUserCollectionPage(options, cookieHeader);
-  } catch (error) {
-    if (!(error instanceof HttpRequestError && error.code === 'AUTH_REQUIRED')) throw error;
-    const page = await getUserCollectionPage(options);
-    return { ...page, warnings: [STALE_SESSION_WARNING, ...page.warnings] };
-  }
-}
+import { cleanText, fetchHtml, fetchHtmlPage } from './common.js';
 
 interface ProfileMatch {
   id: string;
@@ -36,27 +10,6 @@ export interface CurrentUserProfile {
   id: string;
   name: string;
   url: string;
-}
-
-export interface CollectionRecord {
-  id: string;
-  title: string;
-  url: string;
-  status: CollectionStatus;
-  date?: string;
-  rating?: number;
-  comment?: string;
-}
-
-export interface CollectionRecordLoadOptions {
-  pageDelayMs?: number;
-  onProgress?: (fetched: number) => void;
-}
-
-export interface CollectionRecordResult {
-  records: CollectionRecord[];
-  partial: boolean;
-  warnings: string[];
 }
 
 function parseMineAnchor(html: string): ProfileMatch | null {
@@ -146,48 +99,3 @@ export async function getCurrentUserProfile(cookies: string): Promise<CurrentUse
   }
 }
 
-export async function getCollectionRecords(
-  userId: string,
-  status: CollectionStatus,
-  limit: number,
-  cookies: string,
-  options: CollectionRecordLoadOptions = {}
-): Promise<CollectionRecordResult> {
-  const id = userId.trim();
-  if (!id) throw new Error('用户 ID 不能为空');
-  if (!Number.isInteger(limit) || limit <= 0) {
-    return { records: [], partial: false, warnings: [] };
-  }
-
-  const page = await loadAuthenticatedUserCollectionPage({
-    kind: 'movie',
-    userId: id,
-    status,
-    start: 0,
-    count: limit,
-    pageDelayMs: options.pageDelayMs,
-    onProgress: options.onProgress
-  }, cookies);
-  const warnings = page.warnings.length > 0
-    ? page.warnings
-    : page.partial
-      ? ['豆瓣返回了部分收藏结果，但未提供具体原因']
-      : [];
-  if (warnings.length > 0) {
-    debug('account', `用户收藏仅返回部分结果: ${warnings.join('; ')}`);
-  }
-
-  return {
-    records: page.items.map((item) => ({
-      id: item.id,
-      title: item.title,
-      url: item.url,
-      status,
-      date: item.date || undefined,
-      rating: item.rating > 0 ? item.rating : undefined,
-      comment: item.comment || undefined
-    })),
-    partial: page.partial,
-    warnings
-  };
-}

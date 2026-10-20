@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import { getCurrentUserProfile } from '../api/account.js';
 import { getNowShowing } from '../api/movie.js';
 import { searchMovies } from '../api/search.js';
-import { detectAuthSession } from '../auth.js';
+import { detectAuthSession } from '../auth/index.js';
 import { resolveCliStoragePaths } from '../storage/paths.js';
 import { withErrorHandler } from '../utils/error.js';
 
@@ -31,7 +31,9 @@ async function probe(name: string, run: () => Promise<string>): Promise<Check> {
   } catch (error) {
     const code = error instanceof Error && 'code' in error ? String(error.code) : '';
     const message = error instanceof Error ? error.message : String(error);
-    return { name, status: code === 'RATE_LIMITED' ? 'warn' : 'fail', detail: code ? `[${code}] ${message}` : message };
+    // Throttling and verification pass with time; they are not a broken setup.
+    const temporary = code === 'CHALLENGE' || (error instanceof Error && 'status' in error && error.status === 429);
+    return { name, status: temporary ? 'warn' : 'fail', detail: code ? `[${code}] ${message}` : message };
   }
 }
 

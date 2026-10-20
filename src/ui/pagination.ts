@@ -32,10 +32,11 @@ export async function withPagination<T>({
   createReadline,
   writeMessage = console.log
 }: PaginationOptions<T>): Promise<void> {
-  // Non-interactive mode renders exactly one deterministic page.
+  // Non-interactive mode renders exactly one page and says how to get the next.
   if (!interactive) {
     const { items, total, hasMore } = await fetchPage(startPage);
     renderPage(items, startPage, total, hasMore);
+    writeMessage(hasMore ? `\n还有更多，加 --page ${startPage + 1} 查看下一页` : '\n已到最后一页');
     return;
   }
 
@@ -66,6 +67,7 @@ export async function withPagination<T>({
   const render = async (): Promise<PaginationPage<T>> => {
     const result = await loadPage(page);
     renderPage(result.items, page, result.total, result.hasMore);
+    if (!result.hasMore) writeMessage('\n已到最后一页');
     return result;
   };
 

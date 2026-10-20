@@ -1,8 +1,5 @@
 import {
-  assertSearchAvailable,
   cleanText,
-  extractWindowJsonObject,
-  fetchHtml,
   fetchJson,
   isRecord,
   normalizeTitle,
@@ -10,203 +7,125 @@ import {
   withOptionalSession,
   type SessionReadOptions
 } from './common.js';
-import { debug } from '../utils/debug.js';
+import type { SubjectKind } from './subject.js';
 
 export interface SearchItem {
   id: string;
   title: string;
   rating: string;
   year?: string;
+  /** `tv` for series. */
+  type?: 'movie' | 'tv';
   url: string;
   cover?: string;
   abstract?: string;
 }
 
-interface MovieSearchPage {
-  items: SearchItem[];
-  start: number;
-  count: number;
-  total: number;
+export interface SubjectSearchResult {
+  id: string;
+  title: string;
+  /** movie, tv or book. */
+  type: string;
+  year?: string;
+  rating: string;
+  votes: number;
+  /** card_subtitle, e.g. 中国大陆 / 剧情 / 陈凯歌 or 作者 / 2020 / 出版社. */
+  subtitle: string;
+  cover?: string;
+  url: string;
 }
 
-interface SuggestResult {
-  years: Map<string, string>;
-  items: SearchItem[];
+const PAGE_SIZE = 20;
+
+function parseSearchItem(kind: SubjectKind, item: unknown): SubjectSearchResult | null {
+  if (!isRecord(item) || !isRecord(item.target)) return null;
+  const type = typeof item.target_type === 'string' ? item.target_type : '';
+  const accepted = kind === 'movie' ? type === 'movie' || type === 'tv' : type === 'book';
+  const { target } = item;
+  const id = String(target.id ?? '');
+  const title = typeof target.title === 'string' ? normalizeTitle(target.title) : '';
+  if (!accepted || !/^\d+$/.test(id) || !title) return null;
+  const rating = isRecord(target.rating) ? target.rating : {};
+  return {
+    id,
+    title,
+    type,
+    year: typeof target.year === 'string' && target.year ? target.year : undefined,
+    // Douban reports unrated titles as 0.
+    rating: typeof rating.value === 'number' && rating.value > 0 ? rating.value.toFixed(1) : '-',
+    votes: typeof rating.count === 'number' ? rating.count : 0,
+    subtitle: typeof target.card_subtitle === 'string' ? cleanText(target.card_subtitle) : '',
+    cover: typeof target.cover_url === 'string' ? target.cover_url : undefined,
+    url: `https://${kind}.douban.com/subject/${id}/`
+  };
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+/**
+ * Movie (including series) or book search through the mobile API. A failure
+ * after the first page keeps what was read and adds a warning.
+ */
+export async function searchSubjects(
+  kind: SubjectKind,
+  keyword: string,
+  start = 0,
+  limit = 20,
+  options: SessionReadOptions = {}
+): Promise<SubjectSearchResult[]> {
+  const query = keyword.trim();
+  if (!query) return [];
+  if (!Number.isInteger(start) || start < 0) throw new Error('start 必须是非负整数');
+  if (!Number.isInteger(limit) || limit <= 0) return [];
 
-function readPaginationValue(
-  data: Record<string, unknown>,
-  field: 'start' | 'count' | 'total',
-  url: string
-): number {
-  const value = data[field];
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
-    throw new ResponseSchemaError(`搜索页 __DATA__.${field} 不是非负整数`, url);
-  }
-  return value;
-}
-
-async function fetchSuggestions(keyword: string, options: SessionReadOptions): Promise<SuggestResult> {
-  const url = `https://movie.douban.com/j/subject_suggest?q=${encodeURIComponent(keyword)}`;
-  const response = await withOptionalSession(options, (session) => (
-    fetchJson<unknown>(url, { Referer: 'https://movie.douban.com/', ...session })
-  ));
-  if (!Array.isArray(response)) {
-    throw new ResponseSchemaError('电影建议接口返回格式异常', url);
-  }
-  const records = response.filter(isRecord);
-  if (response.length > 0 && records.length === 0) {
-    throw new ResponseSchemaError('电影建议接口未返回有效条目', url);
-  }
-
-  const years = new Map<string, string>();
-  const items: SearchItem[] = [];
+  const results: SubjectSearchResult[] = [];
   const seen = new Set<string>();
-  for (const item of records) {
-    if (typeof item.type === 'string' && item.type !== 'movie' && item.type !== 'tv') continue;
-    const id = typeof item.id === 'string' || typeof item.id === 'number' ? String(item.id).trim() : '';
-    const title = normalizeTitle(typeof item.title === 'string' ? item.title : '');
-    const year = typeof item.year === 'string' || typeof item.year === 'number' ? String(item.year).trim() : '';
-    if (!id || !title || seen.has(id)) continue;
-    seen.add(id);
-    if (year) years.set(id, year);
-    items.push({
-      id,
-      title,
-      rating: '-',
-      year: year || undefined,
-      url: typeof item.url === 'string' ? item.url : `https://movie.douban.com/subject/${id}/`,
-      cover: typeof item.img === 'string' ? item.img : undefined,
-      abstract: cleanText(typeof item.sub_title === 'string' ? item.sub_title : '') || undefined
-    });
+  let cursor = start;
+  while (results.length < limit) {
+    const url = `https://m.douban.com/rexxar/api/v2/search/${kind}?q=${encodeURIComponent(query)}&start=${cursor}&count=${PAGE_SIZE}`;
+    let data: unknown;
+    try {
+      data = await withOptionalSession(options, (session) => fetchJson<unknown>(url, {
+        Referer: `https://m.douban.com/search/?query=${encodeURIComponent(query)}&type=${kind}`,
+        ...session
+      }));
+      if (!isRecord(data) || !Array.isArray(data.items) || typeof data.total !== 'number') {
+        throw new ResponseSchemaError('搜索接口返回格式异常', url);
+      }
+    } catch (error) {
+      if (cursor === start) throw error;
+      options.warnings?.push(`后续搜索结果读取失败，结果可能不完整：${error instanceof Error ? error.message : String(error)}`);
+      break;
+    }
+
+    if (typeof data.banned === 'string' && data.banned.trim() && data.items.length === 0) {
+      throw new Error(`豆瓣未返回这个关键词的搜索结果：${cleanText(data.banned)}`);
+    }
+    for (const item of data.items) {
+      const parsed = parseSearchItem(kind, item);
+      if (!parsed || seen.has(parsed.id)) continue;
+      seen.add(parsed.id);
+      results.push(parsed);
+    }
+    cursor += data.items.length;
+    if (data.items.length === 0 || cursor >= data.total) break;
   }
-  return { years, items };
+  return results.slice(0, limit);
 }
 
-export function parseMovieSearchPage(html: string, url = 'https://search.douban.com/movie/subject_search'): MovieSearchPage {
-  const rawData = extractWindowJsonObject(html, '__DATA__');
-  if (!rawData) throw new ResponseSchemaError('搜索页未找到完整的 __DATA__ JSON 数据', url);
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawData);
-  } catch (error) {
-    throw new ResponseSchemaError(
-      `搜索页 __DATA__ 解析失败: ${error instanceof Error ? error.message : String(error)}`,
-      url,
-      rawData.slice(0, 240)
-    );
-  }
-
-  if (!isRecord(parsed) || !Array.isArray(parsed.items)) {
-    throw new ResponseSchemaError('搜索页 __DATA__.items 不是数组', url, rawData.slice(0, 240));
-  }
-  assertSearchAvailable(parsed, url);
-
-  const items = parsed.items
-    .filter(isRecord)
-    .filter((item) => item.tpl_name === 'search_subject' && typeof item.url === 'string')
-    .map((item) => {
-      const rating = isRecord(item.rating) ? item.rating.value : undefined;
-      // Douban reports unrated titles as 0.
-      const ratingValue = typeof rating === 'number' && Number.isFinite(rating) && rating > 0
-        ? rating.toFixed(1)
-        : '-';
-      const abstract = typeof item.abstract === 'string' ? item.abstract : '';
-      const yearMatch = abstract.match(/(19|20)\d{2}/);
-      return {
-        id: typeof item.id === 'string' || typeof item.id === 'number' ? String(item.id).trim() : '',
-        title: normalizeTitle(typeof item.title === 'string' ? item.title : ''),
-        rating: ratingValue,
-        year: yearMatch?.[0],
-        url: item.url as string,
-        cover: typeof item.cover_url === 'string' ? item.cover_url : undefined,
-        abstract: cleanText(abstract)
-      };
-    })
-    .filter((item) => item.id && item.title);
-
-  const start = readPaginationValue(parsed, 'start', url);
-  const count = readPaginationValue(parsed, 'count', url);
-  const total = readPaginationValue(parsed, 'total', url);
-  if (count > 0 && items.length === 0 && start < total) {
-    throw new ResponseSchemaError('搜索页声明有结果但未解析出任何电影', url, rawData.slice(0, 240));
-  }
-
-  return { items, start, count, total };
-}
-
-/** Search movies through the HTML search endpoint and aggregate its 15-item pages. */
 export async function searchMovies(
   keyword: string,
   start = 0,
   limit = 20,
   options: SessionReadOptions = {}
 ): Promise<SearchItem[]> {
-  const query = keyword.trim();
-  if (!query) return [];
-  if (!Number.isInteger(start) || start < 0) throw new Error('start 必须是非负整数');
-  if (!Number.isInteger(limit) || limit <= 0) return [];
-
-  const suggestionPromise = fetchSuggestions(query, { ...options }).catch((error): SuggestResult => {
-    const message = error instanceof Error ? error.message : String(error);
-    debug('search', `suggest 接口失败: ${message}`);
-    return { years: new Map<string, string>(), items: [] };
-  });
-
-  const results: SearchItem[] = [];
-  const seen = new Set<string>();
-  let pageStart = start;
-  let firstPageError: unknown;
-  const maxPages = Math.min(50, Math.max(1, Math.ceil(limit / 15) + 3));
-
-  for (let pageNumber = 0; pageNumber < maxPages && results.length < limit; pageNumber += 1) {
-    const pageUrl = `https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(query)}&cat=1002&start=${pageStart}`;
-    let page: MovieSearchPage;
-    try {
-      const html = await withOptionalSession(options, (session) => fetchHtml(pageUrl, { Referer: 'https://www.douban.com/', ...session }));
-      page = parseMovieSearchPage(html, pageUrl);
-      if (page.start !== pageStart) {
-        throw new ResponseSchemaError(`电影搜索分页起点异常：请求 ${pageStart}，返回 ${page.start}`, pageUrl);
-      }
-    } catch (error) {
-      if (results.length === 0) {
-        firstPageError = error;
-      } else {
-        options.warnings?.push(`后续搜索页读取失败，结果可能不完整：${errorMessage(error)}`);
-      }
-      debug('search', `${results.length > 0 ? '后续搜索页失败，保留已有结果' : '首个搜索页失败'}: ${errorMessage(error)}`);
-      break;
-    }
-
-    for (const item of page.items) {
-      if (seen.has(item.id)) continue;
-      seen.add(item.id);
-      results.push(item);
-      if (results.length >= limit) break;
-    }
-
-    if (page.count <= 0 || pageStart + page.count >= page.total) break;
-    const nextStart = pageStart + page.count;
-    if (nextStart <= pageStart) {
-      throw new ResponseSchemaError('电影搜索分页游标没有前进', pageUrl);
-    }
-    pageStart = nextStart;
-  }
-
-  const suggestions = await suggestionPromise;
-  if (results.length === 0 && firstPageError && start === 0 && suggestions.items.length > 0) {
-    options.warnings?.push(`完整搜索不可用（${errorMessage(firstPageError)}），以下为联想结果，可能不完整且缺少评分`);
-    return suggestions.items.slice(0, limit);
-  }
-  if (results.length === 0 && firstPageError) throw firstPageError;
-
-  return results.slice(0, limit).map((item) => ({
-    ...item,
-    year: suggestions.years.get(item.id) || item.year
+  const results = await searchSubjects('movie', keyword, start, limit, options);
+  return results.map((item) => ({
+    id: item.id,
+    title: item.title,
+    rating: item.rating,
+    year: item.year,
+    type: item.type === 'tv' ? 'tv' : 'movie',
+    url: item.url,
+    cover: item.cover,
+    abstract: item.subtitle || undefined
   }));
 }

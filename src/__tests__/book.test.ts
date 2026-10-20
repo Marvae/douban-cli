@@ -1,46 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getBookInfo, getBookNotes, searchBooks } from '../api/book.ts';
-import { parseBookDetailHtml, parseBookMediaList, parseBookSearchPage } from '../api/book-parsers.ts';
+import { getBookInfo, getBookNotes } from '../api/book.ts';
+import { parseBookDetailHtml, parseBookMediaList } from '../api/book-parsers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
-function searchHtml(start: number, total: number, ids: number[]): string {
-  return `<script>window.__DATA__ = ${JSON.stringify({
-    start,
-    count: ids.length,
-    total,
-    items: ids.map((id) => ({
-      tpl_name: 'search_subject',
-      id,
-      title: `书 ${id}`,
-      url: `https://book.douban.com/subject/${id}/`,
-      abstract: `作者 / 出版社 / 2026-${id % 12 + 1}`,
-      rating: { value: 8.5 }
-    }))
-  })};</script>`;
-}
-
 describe('book parsers', () => {
-  it('parses paginated search metadata and subjects', () => {
-    const page = parseBookSearchPage(searchHtml(15, 40, [16, 17, 18]));
-
-    expect(page.start).toBe(15);
-    expect(page.count).toBe(3);
-    expect(page.total).toBe(40);
-    expect(page.items[0]).toMatchObject({ id: '16', title: '书 16', rating: '8.5', year: '2026' });
-  });
-
-  it('rejects malformed search payloads instead of treating them as empty results', () => {
-    const missingItems = '<script>window.__DATA__ = {"start":0,"count":1,"total":1};</script>';
-    const invalidCount = '<script>window.__DATA__ = {"start":0,"count":"1","total":1,"items":[]};</script>';
-
-    expect(() => parseBookSearchPage(missingItems)).toThrow('items 不是数组');
-    expect(() => parseBookSearchPage(invalidCount)).toThrow('count 不是非负整数');
-  });
-
   it('parses current chart media blocks', () => {
     const html = `
       <li class="media clearfix">
@@ -97,15 +64,6 @@ describe('book parsers', () => {
 });
 
 describe('book API orchestration', () => {
-  it('preserves a blocked ISBN search when suggestions contain no matches', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => (
-      String(input).includes('/subject_search')
-        ? new Response('<form name="sec" id="sec">安全验证</form>')
-        : Response.json([])
-    )));
-    await expect(searchBooks('9787020002207')).rejects.toMatchObject({ code: 'CHALLENGE' });
-  });
-
   it('rejects malformed annotation responses instead of returning an empty list', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({})));
 
@@ -116,22 +74,6 @@ describe('book API orchestration', () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ annotations: [null] })));
 
     await expect(getBookNotes('2567698')).rejects.toMatchObject({ code: 'SCHEMA_MISMATCH' });
-  });
-
-  it('aggregates multiple 15-item search pages to satisfy limit', async () => {
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      const start = Number(new URL(url).searchParams.get('start') || 0);
-      const ids = Array.from({ length: 15 }, (_, index) => start + index + 1);
-      return new Response(searchHtml(start, 40, ids), { status: 200 });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const items = await searchBooks('测试', 0, 20);
-
-    expect(items).toHaveLength(20);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(String(fetchMock.mock.calls[1][0])).toContain('start=15');
   });
 
   it('maps the current mobile array schema and dedicated tags endpoint', async () => {

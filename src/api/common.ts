@@ -1,5 +1,5 @@
 import { HttpClient, type HtmlPage } from './http/client.js';
-import { HttpRequestError, ResponseSchemaError } from './http/errors.js';
+import { HttpRequestError } from './http/errors.js';
 
 export { HttpClient, type HtmlPage } from './http/client.js';
 export { HttpRequestError, ResponseSchemaError } from './http/errors.js';
@@ -22,7 +22,7 @@ export interface SessionReadOptions {
   warnings?: string[];
 }
 
-export function sessionHeaders(cookies: string | undefined): Record<string, string> {
+function sessionHeaders(cookies: string | undefined): Record<string, string> {
   const header = cookies?.trim();
   return header ? { Cookie: header } : {};
 }
@@ -46,16 +46,6 @@ export async function withOptionalSession<T>(
     if (!options.warnings?.includes(STALE_SESSION_WARNING)) options.warnings?.push(STALE_SESSION_WARNING);
     return read({});
   }
-}
-
-/** Search pages report throttling in `__DATA__.error_info` alongside an otherwise valid empty result. */
-export function assertSearchAvailable(data: Record<string, unknown>, url: string): void {
-  const info = typeof data.error_info === 'string' ? data.error_info.trim() : '';
-  if (!info) return;
-  if (/频繁|太快|稍后|限制/.test(info)) {
-    throw new HttpRequestError(`豆瓣暂时限制了搜索：${info}`, { code: 'RATE_LIMITED', url, retryable: true });
-  }
-  throw new ResponseSchemaError(`豆瓣搜索返回错误：${info}`, url);
 }
 
 export async function fetchJson<T>(url: string, headers: Record<string, string> = {}): Promise<T> {
@@ -121,56 +111,3 @@ export function extractField(infoHtml: string, label: string): string {
   return match ? cleanText(match[1]).replace(/^:/, '').trim() : '';
 }
 
-export function extractWindowJsonObject(html: string, variable = '__DATA__'): string | null {
-  const marker = `window.${variable}`;
-  const markerIndex = html.indexOf(marker);
-  if (markerIndex < 0) return null;
-
-  const equalIndex = html.indexOf('=', markerIndex + marker.length);
-  if (equalIndex < 0) return null;
-
-  let start = equalIndex + 1;
-  while (start < html.length && /\s/.test(html[start] || '')) {
-    start += 1;
-  }
-  if (html[start] !== '{') return null;
-
-  let depth = 0;
-  let quote: '"' | "'" | null = null;
-  let escaped = false;
-
-  for (let i = start; i < html.length; i += 1) {
-    const ch = html[i];
-    if (typeof ch !== 'string') break;
-
-    if (quote) {
-      if (escaped) {
-        escaped = false;
-      } else if (ch === '\\') {
-        escaped = true;
-      } else if (ch === quote) {
-        quote = null;
-      }
-      continue;
-    }
-
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      continue;
-    }
-
-    if (ch === '{') {
-      depth += 1;
-      continue;
-    }
-
-    if (ch === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        return html.slice(start, i + 1);
-      }
-    }
-  }
-
-  return null;
-}

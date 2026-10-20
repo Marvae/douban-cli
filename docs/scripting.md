@@ -20,14 +20,12 @@ douban whoami --json
 
 以下命令在交互终端中支持翻页：
 
-- 电影：`top250`、`comments`、`reviews`、`user`。
-- 图书：`book comments`、`book reviews`、`book notes`、`book user`。
+- 电影：`top250`、`comments`、`reviews`、`user`、`me`。
+- 图书：`book top250`、`book comments`、`book reviews`、`book notes`、`book user`、`book me`。
 
 按回车或 `n` 下一页，`p` 上一页，`g <页码>` 跳转，`q` 退出。已经访问过的页面会在本次会话中复用。
 
-使用 `--json`、管道或重定向时不会进入交互模式，只返回 `--page` 指定的页面。`search`、`book search` 和 `book top250` 使用 `--start` 偏移量，不使用交互分页。
-
-电影和图书 Top250 在桌面网页不可用时会回退到豆瓣公开移动榜单，保持原有的分页参数；触发 HTTP 429 限流时会停止，不会通过切换数据源继续请求。
+使用 `--json`、管道或重定向时不会进入交互模式，只返回 `--page` 指定的页面；文本输出末尾会提示下一页的 `--page`，或说明已到最后一页。`search`、`book search` 和 `list` 使用 `--start` 偏移量，不使用交互分页。
 
 ## 排查问题
 

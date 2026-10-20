@@ -7,10 +7,10 @@ import {
   loginWithBrowser,
   type AuthSession,
   type BrowserName
-} from '../auth.js';
+} from '../auth/index.js';
 import { CliArgumentError, withErrorHandler } from '../utils/error.js';
 import { parsePositiveIntAtMost } from '../utils/parsing.js';
-import { withSpinner } from '../utils/spinner.js';
+import { withSpinner } from '../ui/spinner.js';
 
 function toSafeSessionJson(session: AuthSession): Record<string, string | undefined> {
   return {

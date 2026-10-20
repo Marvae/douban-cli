@@ -4,27 +4,30 @@ Unofficial Douban CLI: Node.js 22.13+, TypeScript ESM, Commander. `src/` builds 
 
 ## Layout
 
-- `src/commands/` — arguments, validation, terminal and `--json` output. Never calls `fetch` directly.
+- `src/commands/` — one file per command group: arguments, validation, `--json` output. Never calls `fetch` directly.
+  - `collection.ts` — `user`, `me`, `book user`, `book me`; `export.ts` — `stats`, `export`, `book export`; `social.ts` — `review`, `follow`.
+- `src/ui/` — terminal presentation shared by commands: tables, star and number formats, list layouts, interactive pagination, spinner, display width.
 - `src/api/` — Douban URLs, response validation and parsing; no terminal output.
   - `http/` — the read client: timeouts, retries for idempotent GETs, redirects, challenge/login detection, structured `HttpRequestError`.
-  - `common.ts` — shared read helpers, `SessionReadOptions` (optional cookies and a warnings sink), search throttle detection.
+  - `common.ts` — shared read helpers and `SessionReadOptions` (optional cookies and a warnings sink).
   - `movie.ts`, `book.ts` (+ `book-parsers.ts`), `search.ts`, `list.ts` — domain reads.
   - `subject.ts` — what movies and books genuinely share: ratings, comments, reviews, mobile collections, recommendations.
-  - `collection.ts`, `account.ts` — user collections and authenticated profile reads.
+  - `collection.ts` — user collections, with or without the session; `account.ts` — the signed-in account's profile.
   - `record.ts` — the account's own record: read the edit form, patch, submit, read back.
   - `mutations.ts` — CSRF (`ck`) handling and POST endpoints; the only place that sends writes.
-  - `index.ts` — anonymous public reads only (guarded by `api-boundary.test.ts`).
-- `src/auth.ts`, `src/storage/` — login, encrypted auth cache, private file writes.
+- `src/auth/` — login and the saved session: `cookies`, `cache` (encrypted), `browser-cookies`, `browser-open`, `session`, `login`; `index.ts` is the public entry.
+- `src/storage/` — CLI config, storage paths, private file writes.
 - `skills/douban-cli/` — the Agent Skill shipped in the npm package and installed from GitHub.
 - `docs/` — user documentation; `README.md` stays a short overview.
 
 ## Invariants
 
-- Treat Douban HTML and JSON as untrusted; validate at the API boundary. A page that cannot be parsed, a challenge, or a throttle (`__DATA__.error_info`, HTTP 429) must raise a structured error, never an empty result.
+- Prefer the public mobile JSON API (`m.douban.com/rexxar`); parse HTML only where it has no equivalent (collections, book charts, weekly chart, coming soon, ISBN, the write form).
+- Treat Douban HTML and JSON as untrusted; validate at the API boundary. A page that cannot be parsed, a challenge or HTTP 429 must raise a structured error, never an empty result.
 - Keep data that was fetched when a later page or source fails, and report it as partial (warnings on stderr, `partial`/`warnings` in JSON).
 - Public reads never read the auth cache implicitly. Commands may pass the cached session explicitly (`getOptionalSessionCookies`) where anonymous access is throttled or incomplete: search, title resolution, collections.
 - Writes always go through `record.ts`: start from the current form, change only requested fields, never submit `share-shuo`, and verify by reading back. Writes are never retried, except one `ck` refresh.
-- `--json` sends results to stdout and structured errors to stderr; non-TTY output never paginates interactively.
+- `--json` sends results to stdout and structured errors to stderr; non-TTY output never paginates interactively and ends with the next `--page` hint.
 - Keep movie- and book-specific code separate until both share the same contract.
 - Comments in English; user-facing text may be Chinese.
 

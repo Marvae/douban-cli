@@ -1,4 +1,4 @@
-import { cleanText, extractNumericId, fetchHtml, ResponseSchemaError } from './common.js';
+import { cleanText, extractNumericId, fetchHtml, fetchJson, isRecord, ResponseSchemaError } from './common.js';
 import { sleep } from '../utils/timing.js';
 
 export interface DoulistItem {
@@ -65,15 +65,11 @@ export interface DoulistEntry {
   url: string;
 }
 
-export interface DoulistPage {
+export interface Doulist {
+  id: string;
   title: string;
   description: string;
   items: DoulistEntry[];
-  nextStart: number | null;
-}
-
-export interface Doulist extends Omit<DoulistPage, 'nextStart'> {
-  id: string;
   url: string;
   next_start: number | null;
   partial: boolean;
@@ -94,94 +90,84 @@ export function parseDoulistId(input: string): string {
   throw new Error('豆列必须是数字 ID 或 https://www.douban.com/doulist/<id>/ 地址');
 }
 
-function entryKind(hostname: string): DoulistEntry['kind'] {
-  if (hostname === 'movie.douban.com') return 'movie';
-  if (hostname === 'book.douban.com') return 'book';
-  if (hostname === 'music.douban.com') return 'music';
-  return 'other';
-}
+const DOULIST_API = 'https://m.douban.com/rexxar/api/v2/doulist';
 
-export function parseDoulistPage(html: string, url: string): DoulistPage {
-  const title = cleanText(html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? '');
-  if (!title) throw new ResponseSchemaError('豆列页面缺少标题', url);
-  const description = cleanText((html.match(/<div class="doulist-about">([\s\S]*?)<\/div>/i)?.[1] ?? '').replace(/<br\s*\/?>/gi, ' '));
-
-  const blocks = html.split(/<div[^>]*class=["']doulist-item["'][^>]*>/i).slice(1);
-  const items: DoulistEntry[] = [];
-  for (const block of blocks) {
-    const link = block.match(/<div class="title">\s*<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
-    if (!link) continue;
-    let target: URL;
-    try {
-      target = new URL(link[1], url);
-    } catch {
-      continue;
-    }
-    items.push({
-      position: Number(block.match(/<span class="pos">\s*(\d+)\s*<\/span>/)?.[1] ?? items.length + 1),
-      id: target.pathname.match(/\/subject\/(\d+)/)?.[1] ?? '',
-      kind: entryKind(target.hostname),
-      title: cleanText(link[2]),
-      rating: cleanText(block.match(/<span class="rating_nums">([\s\S]*?)<\/span>/)?.[1] ?? '') || '-',
-      abstract: cleanText((block.match(/<div class="abstract">([\s\S]*?)<\/div>/)?.[1] ?? '').replace(/<br\s*\/?>/gi, ' / ')),
-      url: target.href
-    });
-  }
-  if (blocks.length > 0 && items.length === 0) {
-    throw new ResponseSchemaError('豆列页面未解析出任何条目', url);
-  }
-
-  const next = html.match(/<span class="next">[\s\S]*?<a[^>]*href=["'][^"']*[?&](?:amp;)?start=(\d+)/i)?.[1];
-  return { title, description, items, nextStart: next === undefined ? null : Number(next) };
+function parseDoulistEntry(item: unknown, position: number): DoulistEntry | null {
+  if (!isRecord(item)) return null;
+  const title = typeof item.title === 'string' ? cleanText(item.title) : '';
+  const url = typeof item.url === 'string' ? item.url : '';
+  if (!title || !url) return null;
+  // Series count as movies so `movie <id>` follows up on them.
+  const kind = item.type === 'movie' || item.type === 'tv' ? 'movie'
+    : item.type === 'book' || item.type === 'music' ? item.type
+      : 'other';
+  const rating = isRecord(item.rating) ? item.rating.value : undefined;
+  return {
+    position,
+    id: kind === 'other' ? '' : String(item.target_id ?? ''),
+    kind,
+    title,
+    rating: typeof rating === 'number' && rating > 0 ? rating.toFixed(1) : '-',
+    abstract: typeof item.subtitle === 'string' ? cleanText(item.subtitle) : '',
+    url
+  };
 }
 
 /**
- * Read a doulist across pages (25 entries each). A failure after the first
- * page keeps what was read and reports it as partial.
+ * Read a doulist through the mobile API, up to 50 entries per request. A
+ * failure after the first page keeps what was read and reports it as partial.
  */
 export async function getDoulist(
   input: string,
   options: { start?: number; limit?: number; delayMs?: number } = {}
 ): Promise<Doulist> {
   const id = parseDoulistId(input);
-  const url = `https://www.douban.com/doulist/${id}/`;
   const limit = options.limit ?? 25;
-  let cursor = options.start ?? 0;
+  const start = options.start ?? 0;
   if (!Number.isInteger(limit) || limit <= 0) throw new Error('limit 必须是正整数');
-  if (!Number.isInteger(cursor) || cursor < 0) throw new Error('start 必须是非负整数');
+  if (!Number.isInteger(start) || start < 0) throw new Error('start 必须是非负整数');
 
-  let first: DoulistPage | undefined;
-  let nextStart: number | null = cursor;
+  const headers = { Referer: `https://m.douban.com/doulist/${id}/` };
+  const info = await fetchJson<unknown>(`${DOULIST_API}/${id}`, headers);
+  if (!isRecord(info) || typeof info.title !== 'string') {
+    throw new ResponseSchemaError('豆列接口返回格式异常', `${DOULIST_API}/${id}`);
+  }
+
   const items: DoulistEntry[] = [];
   const warnings: string[] = [];
-  while (nextStart !== null && items.length < limit) {
-    if (first) await sleep(options.delayMs ?? 1000);
-    let page: DoulistPage;
+  let cursor = start;
+  let total = Number.POSITIVE_INFINITY;
+  while (items.length < limit && cursor < total) {
+    if (cursor > start) await sleep(options.delayMs ?? 1000);
+    const url = `${DOULIST_API}/${id}/items?start=${cursor}&count=${Math.min(50, limit - items.length)}`;
+    let entries: unknown[];
     try {
-      page = parseDoulistPage(await fetchHtml(`${url}?start=${cursor}`, { Referer: url }), url);
+      const data = await fetchJson<unknown>(url, headers);
+      if (!isRecord(data) || !Array.isArray(data.items) || typeof data.total !== 'number') {
+        throw new ResponseSchemaError('豆列条目接口返回格式异常', url);
+      }
+      entries = data.items.slice(0, limit - items.length);
+      total = data.total;
     } catch (error) {
-      if (!first) throw error;
+      if (cursor === start) throw error;
       warnings.push(`start=${cursor} 读取失败：${error instanceof Error ? error.message : String(error)}`);
       break;
     }
-    first ??= page;
-    const room = limit - items.length;
-    items.push(...page.items.slice(0, room));
-    nextStart = page.items.length > room ? cursor + room : page.nextStart;
-    if (nextStart !== null && nextStart <= cursor) {
-      warnings.push('豆列分页游标没有前进，已停止');
-      break;
-    }
-    if (nextStart !== null) cursor = nextStart;
+    if (entries.length === 0) break;
+    entries.forEach((item, index) => {
+      const entry = parseDoulistEntry(item, cursor + index + 1);
+      if (entry) items.push(entry);
+    });
+    cursor += entries.length;
   }
 
   return {
     id,
-    url,
-    title: first?.title ?? '',
-    description: first?.description ?? '',
+    url: `https://www.douban.com/doulist/${id}/`,
+    title: cleanText(info.title),
+    description: typeof info.desc === 'string' ? cleanText(info.desc) : '',
     items,
-    next_start: warnings.length > 0 ? cursor : nextStart,
+    next_start: cursor < total ? cursor : null,
     partial: warnings.length > 0,
     warnings
   };

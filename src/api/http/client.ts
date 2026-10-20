@@ -55,7 +55,7 @@ function isHtmlContentType(contentType: string): boolean {
   return /(?:text\/html|application\/xhtml\+xml|text\/plain)/i.test(contentType);
 }
 
-export function isChallengeHtml(html: string): boolean {
+function isChallengeHtml(html: string): boolean {
   const normalized = html.toLowerCase();
   return (
     (normalized.includes('name="sec"') && normalized.includes('id="sec"'))
@@ -66,7 +66,7 @@ export function isChallengeHtml(html: string): boolean {
   );
 }
 
-export function isLoginHtml(html: string): boolean {
+function isLoginHtml(html: string): boolean {
   return (
     /<title[^>]*>\s*(?:登录豆瓣|豆瓣登录)[\s\S]*?<\/title>/i.test(html)
     || (/accounts\.douban\.com\/passport\/login/i.test(html) && /(?:form_email|form_password|account-form)/i.test(html))

@@ -13,7 +13,7 @@ import {
   getWeekly
 } from '../api/movie.js';
 import { searchMovies } from '../api/search.js';
-import { getOptionalSessionCookies } from '../auth.js';
+import { getOptionalSessionCookies } from '../auth/index.js';
 import { CliArgumentError, printWarnings, withErrorHandler } from '../utils/error.js';
 import {
   getPageRange,
@@ -23,64 +23,11 @@ import {
   parsePositiveInt,
   parsePositiveIntAtMost
 } from '../utils/parsing.js';
-import { withSpinner } from '../utils/spinner.js';
-import { getDisplayWidth } from '../utils/text.js';
-import { withPagination } from '../utils/pagination.js';
-
-interface TableColumn<Row> {
-  header: string;
-  value: (row: Row, index: number) => string;
-  minWidth?: number;
-}
+import { withSpinner } from '../ui/spinner.js';
+import { compactNumber, formatTrend, printListHeading, printPosts, printRatingBars, renderTable, subjectLabel } from '../ui/output.js';
+import { withPagination } from '../ui/pagination.js';
 
 const TV_TAGS = ['热门', '美剧', '英剧', '日剧', '韩剧', '国产剧', '综艺', '最新'] as const;
-
-function padCell(text: string, width: number): string {
-  const padding = Math.max(0, width - getDisplayWidth(text));
-  return text + ' '.repeat(padding);
-}
-
-function renderTable<Row>(rows: Row[], columns: TableColumn<Row>[]): void {
-  if (rows.length === 0) {
-    return;
-  }
-
-  const cells = rows.map((row, rowIndex) => (
-    columns.map((column) => column.value(row, rowIndex))
-  ));
-  const widths = columns.map((col, columnIndex) => {
-    let maxWidth = Math.max(getDisplayWidth(col.header), col.minWidth ?? 0);
-
-    cells.forEach((row) => {
-      const valueWidth = getDisplayWidth(row[columnIndex]);
-      if (valueWidth > maxWidth) {
-        maxWidth = valueWidth;
-      }
-    });
-
-    return maxWidth;
-  });
-
-  console.log(columns.map((col, i) => padCell(col.header, widths[i])).join('   '));
-
-  cells.forEach((row) => {
-    console.log(
-      row
-        .map((value, i) => padCell(value, widths[i]))
-        .join('   ')
-    );
-  });
-}
-
-function compactNumber(value: number | undefined): string {
-  if (value === 0) return '0';
-  if (!value || value < 0) return '-';
-  if (value >= 10000) {
-    const n = Math.round((value / 10000) * 10) / 10;
-    return Number.isInteger(n) ? `${n.toFixed(0)}万` : `${n.toFixed(1)}万`;
-  }
-  return value.toLocaleString();
-}
 
 function normalizeDate(value: string | undefined): string {
   if (!value) return '-';
@@ -129,10 +76,10 @@ function normalizeMovieIdInput(value: string, fieldName = '电影 ID'): string {
 }
 
 /** Accept a numeric subject ID or a title; titles are resolved through search with the local session. */
-async function resolveMovieId(input: string, outputJson: boolean): Promise<string> {
+async function resolveMovie(input: string, outputJson: boolean): Promise<{ id: string; title?: string }> {
   const query = input.trim();
   if (!query) throw new Error('电影 ID 或片名不能为空');
-  if (isNumericId(query)) return query;
+  if (isNumericId(query)) return { id: query };
 
   const warnings: string[] = [];
   const cookies = await getOptionalSessionCookies();
@@ -140,8 +87,8 @@ async function resolveMovieId(input: string, outputJson: boolean): Promise<strin
   printWarnings(warnings);
   if (!matched?.id) throw new Error(`未找到电影：${query}`);
   const movieId = normalizeMovieIdInput(matched.id, '匹配到的电影 ID');
-  if (!outputJson) console.log(`\n🔎 已匹配为: ${matched.title} (${movieId})`);
-  return movieId;
+  if (!outputJson) console.log(`\n🔎 已匹配为 ${subjectLabel(movieId, matched.title)}`);
+  return { id: movieId, title: matched.title };
 }
 
 export function registerMovieCommands(program: Command): void {
@@ -173,7 +120,8 @@ export function registerMovieCommands(program: Command): void {
         renderTable(items, [
           { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
           { header: '片名', value: (item) => item.title, minWidth: 18 },
-          { header: '评分', value: (item) => (item.rate && item.rate !== '0' ? item.rate : '-') }
+          { header: '评分', value: (item) => (item.rate && item.rate !== '0' ? item.rate : '-') },
+          { header: 'ID', value: (item) => item.id }
         ]);
       }
     }));
@@ -187,11 +135,11 @@ export function registerMovieCommands(program: Command): void {
     .action(withErrorHandler((args) => ({
       command: 'tv',
       target: `标签: ${String(args[0] || '未指定')}`,
-      options: '标签：美剧、日剧、韩剧、国产剧、综艺',
+      options: TV_TAGS.join('、'),
       suggestion: '可尝试：douban tv 美剧'
     }), async (tag, opts) => {
       if (!TV_TAGS.includes(tag as (typeof TV_TAGS)[number])) {
-        throw new Error(`未知剧集标签: ${tag}。可选标签：${TV_TAGS.join('、')}`);
+        throw new CliArgumentError('不支持这个标签');
       }
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const items = await withSpinner(
@@ -207,7 +155,8 @@ export function registerMovieCommands(program: Command): void {
         renderTable(items, [
           { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
           { header: '片名', value: (item) => item.title, minWidth: 18 },
-          { header: '评分', value: (item) => (item.rate && item.rate !== '0' ? item.rate : '-') }
+          { header: '评分', value: (item) => (item.rate && item.rate !== '0' ? item.rate : '-') },
+          { header: 'ID', value: (item) => item.id }
         ]);
       }
     }));
@@ -221,7 +170,7 @@ export function registerMovieCommands(program: Command): void {
     .action(withErrorHandler((args) => ({
       command: 'rank',
       target: `类型: ${String(args[0] || '未指定')}`,
-      options: `${Object.keys(GENRES).join('、')}`,
+      options: Object.keys(GENRES).join('、'),
       suggestion: '可尝试：douban rank 科幻'
     }), async (genre, opts) => {
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
@@ -246,7 +195,8 @@ export function registerMovieCommands(program: Command): void {
           { header: '年份', value: (item) => normalizeYear(item.release_date) },
           { header: '类型', value: (item) => formatTags(item.types), minWidth: 14 },
           { header: '评分', value: (item) => item.score || '-' },
-          { header: '评价', value: (item) => compactNumber(item.vote_count) }
+          { header: '评价', value: (item) => compactNumber(item.vote_count) },
+          { header: 'ID', value: (item) => item.id }
         ]);
       }
     }));
@@ -256,14 +206,15 @@ export function registerMovieCommands(program: Command): void {
     .helpGroup('电影:')
     .description('获取豆瓣 Top 250 电影')
     .option('-p, --page <n>', '页码（从 1 开始）', '1')
+    .option('-n, --limit <n>', '每页数量', '25')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler({
       command: 'top250',
-      suggestion: '可尝试：douban top250 --page 2'
+      suggestion: '可尝试：douban top250 -n 10 --page 2'
     }, async (opts) => {
-      const page = parsePositiveIntAtMost(opts.page, '--page', 1, 10);
       const total = 250;
-      const limit = 25;
+      const limit = parsePositiveIntAtMost(opts.limit, '--limit', 25, total);
+      const page = parsePositiveIntAtMost(opts.page, '--page', 1, Math.ceil(total / limit));
 
       if (opts.json) {
         const start = pageToOffset(page, limit);
@@ -295,21 +246,15 @@ export function registerMovieCommands(program: Command): void {
         renderPage: (items, currentPage) => {
           const { from, to } = getPageRange(currentPage, limit, items.length);
 
-          console.log(`
-🎬 豆瓣 Top 250，当前显示第 ${from}-${to} 条
-`);
+          console.log(`\n🎬 豆瓣电影 Top250 · 第 ${from}-${to} 部\n`);
           renderTable(items, [
             { header: '#', value: (item) => String(item.rank), minWidth: 3 },
             { header: '片名', value: (item) => item.title, minWidth: 14 },
             { header: '年份', value: (item) => item.year || '-', minWidth: 4 },
             { header: '评分', value: (item) => item.rating || '-', minWidth: 4 },
-            { header: '导演', value: (item) => item.director || '-', minWidth: 10 },
-            { header: '金句', value: (item) => item.quote || '-', minWidth: 16 }
+            { header: '导演', value: (item) => item.director, maxWidth: 20 },
+            { header: 'ID', value: (item) => item.id }
           ]);
-
-          if (to >= total) {
-            console.log('\n已到最后一页');
-          }
         }
       });
     }));
@@ -349,6 +294,7 @@ export function registerMovieCommands(program: Command): void {
         renderTable(items, [
           { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
           { header: '片名', value: (item) => item.title, minWidth: 18 },
+          { header: '类型', value: (item) => (item.type === 'tv' ? '剧集' : item.type === 'movie' ? '电影' : '-') },
           { header: '年份', value: (item) => normalizeYear(item.year) },
           { header: '评分', value: (item) => (item.rating && item.rating !== '-' ? item.rating : '-') },
           { header: 'ID', value: (item) => item.id || '-' }
@@ -366,7 +312,7 @@ export function registerMovieCommands(program: Command): void {
       target: `ID: ${String(args[0] || '未指定')}`,
       suggestion: '确认 ID 是否正确，可使用 douban search 搜索'
     }), async (id, opts) => {
-      const movieId = await resolveMovieId(id, Boolean(opts.json));
+      const { id: movieId } = await resolveMovie(id, Boolean(opts.json));
 
       const detail = await withSpinner(
         '正在获取电影详情...',
@@ -379,7 +325,8 @@ export function registerMovieCommands(program: Command): void {
       } else {
         const titleSuffix = detail.year ? ` (${detail.year})` : '';
         const originalTitle = detail.original_title ? ` / ${detail.original_title}` : '';
-        console.log(`\n🎬 ${detail.title}${titleSuffix}${originalTitle}`);
+        const kind = detail.type === 'tv' ? '📺' : '🎬';
+        console.log(`\n${kind} ${detail.title}${titleSuffix}${originalTitle}${detail.type === 'tv' ? ' · 剧集' : ''}`);
         console.log(`ID: ${detail.id}`);
         console.log(`评分: ${detail.rating || '-'}`);
         console.log(`类型: ${formatDetailList(detail.genres)}`);
@@ -395,7 +342,8 @@ export function registerMovieCommands(program: Command): void {
         console.log(`影评: ${detail.review_count.toLocaleString()}`);
         console.log(`别名: ${formatDetailList(detail.aka)}`);
         console.log(`导演: ${detail.directors.length > 0 ? detail.directors.join(' / ') : '-'}`);
-        console.log(`演员: ${detail.actors.length > 0 ? detail.actors.join(' / ') : '-'}`);
+        const actors = detail.actors.slice(0, 8).join(' / ');
+        console.log(`演员: ${actors || '-'}${detail.actors.length > 8 ? ` 等 ${detail.actors.length} 人` : ''}`);
         console.log(`\n简介:\n${detail.summary || '-'}`);
         if (detail.recommendations.length > 0) {
           console.log(`\n相似推荐: ${detail.recommendations.map((item) => `${item.title}(${item.rating})`).join(' / ')}`);
@@ -414,7 +362,7 @@ export function registerMovieCommands(program: Command): void {
       target: `ID: ${String(args[0] || '未指定')}`,
       suggestion: '可尝试：douban rating 1292052'
     }), async (id, opts) => {
-      const movieId = await resolveMovieId(id, Boolean(opts.json));
+      const { id: movieId } = await resolveMovie(id, Boolean(opts.json));
       const stats = await withSpinner(
         '正在获取评分分布...',
         () => getRatingStats(movieId),
@@ -424,16 +372,9 @@ export function registerMovieCommands(program: Command): void {
       if (opts.json) {
         console.log(JSON.stringify(stats, null, 2));
       } else {
-        console.log(`\n⭐ 评分分布 (${stats.value}分，${stats.count.toLocaleString()}人评价)\n`);
+        console.log(`\n⭐ 评分分布 (${stats.value}分，${compactNumber(stats.count)}人评价)\n`);
 
-        const labels = ['5星', '4星', '3星', '2星', '1星'];
-        const maxPercent = Math.max(...stats.stars);
-
-        stats.stars.slice().reverse().forEach((percent, i) => {
-          const barLen = maxPercent > 0 ? Math.round((percent / maxPercent) * 30) : 0;
-          const bar = '█'.repeat(barLen);
-          console.log(`${labels[i]} ${bar} ${percent}%`);
-        });
+        printRatingBars(stats.stars);
 
         console.log('\n📊 统计');
         console.log(`想看: ${stats.wish_count.toLocaleString()}`);
@@ -502,7 +443,8 @@ export function registerMovieCommands(program: Command): void {
           { header: '日期', value: (item) => normalizeDate(item.release_date) },
           { header: '类型', value: (item) => formatTags(item.types), minWidth: 16 },
           { header: '地区', value: (item) => formatRegion(item.regions), minWidth: 10 },
-          { header: '想看', value: (item) => compactNumber(item.wish_count) }
+          { header: '想看', value: (item) => compactNumber(item.wish_count) },
+          { header: 'ID', value: (item) => item.id }
         ]);
       }
     }));
@@ -528,17 +470,12 @@ export function registerMovieCommands(program: Command): void {
         console.log(JSON.stringify(items, null, 2));
       } else {
         console.log('\n📈 一周口碑榜\n');
-        items.forEach((item) => {
-          let trendDisplay = '—';
-          if (item.trend.startsWith('up')) {
-            const num = item.trend.replace('up ', '').trim();
-            trendDisplay = `🔺${num}`;
-          } else if (item.trend.startsWith('down')) {
-            const num = item.trend.replace('down ', '').trim();
-            trendDisplay = `🔻${num}`;
-          }
-          console.log(`${item.rank.toString().padStart(2)}. ${item.title} ${trendDisplay}`);
-        });
+        renderTable(items, [
+          { header: '#', value: (item) => String(item.rank), minWidth: 2 },
+          { header: '片名', value: (item) => item.title, minWidth: 18 },
+          { header: '变化', value: (item) => formatTrend(item.trend) || '—' },
+          { header: 'ID', value: (item) => item.id }
+        ]);
       }
     }));
 
@@ -554,7 +491,7 @@ export function registerMovieCommands(program: Command): void {
       target: `ID: ${String(args[0] || '未指定')}`,
       suggestion: '可尝试：douban reviews 1292052 --page 2'
     }), async (movieId, opts) => {
-      const id = await resolveMovieId(movieId, Boolean(opts.json));
+      const { id, title } = await resolveMovie(movieId, Boolean(opts.json));
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const page = parsePositiveInt(opts.page, '--page', 1);
 
@@ -590,26 +527,8 @@ export function registerMovieCommands(program: Command): void {
           const start = pageToOffset(currentPage, limit);
           const { from, to } = getPageRange(currentPage, limit, items.length);
 
-          console.log(`
-📝 热门影评 (${id})
-`);
-          console.log(`共 ${(total ?? 0).toLocaleString()} 条影评，当前显示第 ${from}-${to} 条
-`);
-
-          if (items.length === 0) {
-            console.log('暂无更多影评');
-            return;
-          }
-
-          items.forEach((item, i) => {
-            console.log(`${(start + i + 1).toString().padStart(2)}. ${item.user} ⭐${item.rating} 👍${item.votes} ${item.time}`);
-            console.log(`    ${item.content}
-`);
-          });
-
-          if (to >= (total ?? 0)) {
-            console.log('已到最后一页');
-          }
+          printListHeading(`📝 热门影评 · ${subjectLabel(id, title)}`, total, from, to);
+          printPosts(items, start);
         }
       });
     }));
@@ -626,7 +545,7 @@ export function registerMovieCommands(program: Command): void {
       target: `ID: ${String(args[0] || '未指定')}`,
       suggestion: '可尝试：douban comments 1292052'
     }), async (movieId, opts) => {
-      const id = await resolveMovieId(movieId, Boolean(opts.json));
+      const { id, title } = await resolveMovie(movieId, Boolean(opts.json));
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const page = parsePositiveInt(opts.page, '--page', 1);
 
@@ -662,28 +581,8 @@ export function registerMovieCommands(program: Command): void {
           const start = pageToOffset(currentPage, limit);
           const { from, to } = getPageRange(currentPage, limit, items.length);
 
-          console.log(`
-💬 热门短评 (${id})
-`);
-          console.log(`共 ${(total ?? 0).toLocaleString()} 条短评，当前显示第 ${from}-${to} 条
-`);
-
-          if (items.length === 0) {
-            console.log('暂无更多短评');
-            return;
-          }
-
-          items.forEach((item, i) => {
-            const stars = item.rating ? '⭐'.repeat(item.rating) : '';
-            console.log(`${(start + i + 1).toString().padStart(2)}. ${item.user} ${stars} 👍${item.votes}`);
-            console.log(`    ${item.content}`);
-            console.log(`    ${item.time}
-`);
-          });
-
-          if (to >= (total ?? 0)) {
-            console.log('已到最后一页');
-          }
+          printListHeading(`💬 热门短评 · ${subjectLabel(id, title)}`, total, from, to);
+          printPosts(items, start);
         }
       });
     }));

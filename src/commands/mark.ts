@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
-import { ensureAuth } from '../auth.js';
+import { ensureAuth } from '../auth/index.js';
 import {
   editSubjectRecord,
   getSubjectRecord,
@@ -10,10 +10,12 @@ import {
   type SubjectRecord
 } from '../api/record.js';
 import type { SubjectActionKind, SubjectInterest } from '../api/mutations.js';
+import { getSubjectTitle } from '../api/subject.js';
 import { CliArgumentError, withErrorHandler } from '../utils/error.js';
 import { isNumericId } from '../utils/parsing.js';
-import { withSpinner } from '../utils/spinner.js';
+import { withSpinner } from '../ui/spinner.js';
 import { parseDelaySeconds, sleep } from '../utils/timing.js';
+import { formatStars, subjectLabel } from '../ui/output.js';
 
 type Status = Exclude<SubjectInterest, 'none'>;
 
@@ -121,11 +123,16 @@ function nextDelayMs(index: number, total: number, delaySeconds: number): number
 
 function describeRecord(record: SubjectRecord, profile: KindProfile): string {
   const parts = [profile.statusLabels[record.status]];
-  if (record.rating) parts.push('★'.repeat(record.rating));
+  if (record.rating) parts.push(formatStars(record.rating));
   if (record.tags.length > 0) parts.push(`标签:${record.tags.join(' ')}`);
   if (record.private) parts.push('仅自己可见');
   if (record.comment) parts.push(`“${record.comment.length > 30 ? `${record.comment.slice(0, 30)}…` : record.comment}”`);
   return parts.join(' · ');
+}
+
+/** Best-effort title lookup run alongside a write; a failure just omits the title. */
+function lookupTitle(kind: SubjectActionKind, id: string): Promise<string | undefined> {
+  return getSubjectTitle(kind, id).catch(() => undefined);
 }
 
 function describeChange(change: RecordChange, profile: KindProfile): string {
@@ -147,14 +154,17 @@ async function runWrites(
 ): Promise<void> {
   const delaySeconds = parseDelaySeconds(opts.delay);
   const auth = await withSpinner('正在检查登录状态...', () => ensureAuth(), !opts.json);
-  const results: Array<{ id: string; ok: boolean; changed?: boolean; dryRun?: boolean; before?: SubjectRecord; after?: SubjectRecord; error?: string }> = [];
+  const results: Array<{ id: string; title?: string; ok: boolean; changed?: boolean; dryRun?: boolean; before?: SubjectRecord; after?: SubjectRecord; error?: string }> = [];
 
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
     try {
-      const change = await withSpinner(`正在处理 ${item.id}...`, () => write(item, auth.cookies, auth.ck), !opts.json);
-      results.push({ id: item.id, ok: true, ...change });
-      if (!opts.json) console.log(`✓ ${item.id} ${describeChange(change, profile)}`);
+      const [change, title] = await withSpinner(`正在处理 ${item.id}...`, () => Promise.all([
+        write(item, auth.cookies, auth.ck),
+        lookupTitle(profile.kind, item.id)
+      ]), !opts.json);
+      results.push({ id: item.id, ...(title ? { title } : {}), ok: true, ...change });
+      if (!opts.json) console.log(`✓ ${subjectLabel(item.id, title)} ${describeChange(change, profile)}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       results.push({ id: item.id, ok: false, error: message });
@@ -274,13 +284,16 @@ function registerKindCommands(parent: Command, profile: KindProfile): void {
     }, async (id: string, opts) => {
       const subjectId = parseNumericId(id);
       const auth = await withSpinner('正在检查登录状态...', () => ensureAuth(), !opts.json);
-      const record = await withSpinner('正在读取记录...', () => getSubjectRecord(kind, subjectId, auth.cookies), !opts.json);
+      const [record, title] = await withSpinner('正在读取记录...', () => Promise.all([
+        getSubjectRecord(kind, subjectId, auth.cookies),
+        lookupTitle(kind, subjectId)
+      ]), !opts.json);
       if (opts.json) {
-        console.log(JSON.stringify(record, null, 2));
+        console.log(JSON.stringify({ ...(title ? { title } : {}), ...record }, null, 2));
         return;
       }
-      console.log(`\n${noun} ${record.id}: ${statusLabels[record.status]}`);
-      console.log(`评分: ${record.rating ? '★'.repeat(record.rating) : '-'}`);
+      console.log(`\n${subjectLabel(record.id, title)}: ${statusLabels[record.status]}`);
+      console.log(`评分: ${formatStars(record.rating)}`);
       console.log(`标签: ${record.tags.length > 0 ? record.tags.join(' ') : '-'}`);
       console.log(`可见性: ${record.private ? '仅自己可见' : '公开'}`);
       console.log(`短评: ${record.comment || '-'}`);

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { cleanText, extractField, extractWindowJsonObject, HttpClient, HttpRequestError } from '../api/common.ts';
+import { cleanText, extractField, HttpClient, HttpRequestError } from '../api/common.ts';
 
 describe('api/common helpers', () => {
   it('cleanText strips tags and decodes html entities', () => {
@@ -10,11 +10,6 @@ describe('api/common helpers', () => {
   it('extractField parses info block field by label', () => {
     const info = '<span class="pl">导演</span>: <a href="#">克里斯托弗·诺兰</a><br/>';
     expect(extractField(info, '导演')).toBe('克里斯托弗·诺兰');
-  });
-
-  it('extractWindowJsonObject returns full nested object payload', () => {
-    const html = '<script>window.__DATA__ = {"a":1,"nested":{"text":"brace } inside","n":2}};</script>';
-    expect(extractWindowJsonObject(html, '__DATA__')).toBe('{"a":1,"nested":{"text":"brace } inside","n":2}}');
   });
 
   it('retries retryable GET responses and respects Retry-After', async () => {

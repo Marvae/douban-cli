@@ -32,16 +32,16 @@ const authMocks = vi.hoisted(() => ({
   getOptionalSessionCookies: vi.fn()
 }));
 
-vi.mock('../api/account.js', () => ({
+vi.mock('../api/collection.js', () => ({
   getUserCollectionPageWithSession: mocks.getUserCollectionPage
 }));
 vi.mock('../storage/secure-file.js', () => ({
   secureAtomicWriteFile: mocks.secureAtomicWriteFile
 }));
-vi.mock('../utils/pagination.js', () => ({
+vi.mock('../ui/pagination.js', () => ({
   withPagination: mocks.withPagination
 }));
-vi.mock('../utils/spinner.js', () => ({
+vi.mock('../ui/spinner.js', () => ({
   withSpinner: vi.fn(async (_message: string, task: () => Promise<unknown>) => task())
 }));
 vi.mock('../utils/timing.js', () => ({
@@ -50,9 +50,10 @@ vi.mock('../utils/timing.js', () => ({
   )),
   sleep: mocks.sleep
 }));
-vi.mock('../auth.js', () => authMocks);
+vi.mock('../auth/index.js', () => authMocks);
 
-import { registerBookCollectionCommands } from '../commands/book-collection.ts';
+import { registerCollectionCommands } from '../commands/collection.ts';
+import { registerExportCommands } from '../commands/export.ts';
 
 const originalArgv = process.argv;
 
@@ -74,7 +75,8 @@ function createProgram(): Command {
   const program = new Command();
   program.exitOverride();
   const book = program.command('book');
-  registerBookCollectionCommands(book);
+  registerCollectionCommands(program, book);
+  registerExportCommands(program, book);
   return program;
 }
 
@@ -115,7 +117,7 @@ describe('book collection commands', () => {
       'dbcl2=alice; ck=token'
     );
     expect(mocks.withPagination).toHaveBeenCalledOnce();
-    expect(stdout.mock.calls.flat().join('\n')).toContain('ID: 42');
+    expect(stdout.mock.calls.flat().join('\n')).toContain('ID 42');
   });
 
   it('falls back to an anonymous read when no local session exists', async () => {

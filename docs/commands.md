@@ -11,7 +11,7 @@
 | `douban hot` | 热门电影；加 `--tv` 查看剧集 | `--tv`、`--tag`、`--limit` |
 | `douban tv <tag>` | 按标签查看剧集 | `热门/美剧/英剧/日剧/韩剧/国产剧/综艺/最新` |
 | `douban rank <genre>` | 按类型查看高分电影 | `--limit` |
-| `douban top250` | 豆瓣电影 Top250，每页 25 条 | `--page`，支持交互翻页 |
+| `douban top250` | 豆瓣电影 Top250 | `--page`、`--limit`，支持交互翻页 |
 | `douban now` | 正在热映（全国） | `--limit` |
 | `douban coming` | 即将上映 | `--limit` |
 | `douban weekly` | 一周口碑榜与排名趋势 | `--limit` |
@@ -35,9 +35,9 @@ douban comments 1291546
 douban reviews 1291546 --limit 5
 ```
 
-豆瓣对未登录的搜索限流很严，所以搜索和按片名、书名查询会自动复用本地登录态。没有登录时被限流会返回 `RATE_LIMITED`；只拿到联想结果时会在 stderr 提示。ISBN 走豆瓣的直达地址，不经过搜索。
+搜索和按片名、书名查询会自动复用本地登录态，未登录时更容易被豆瓣限流；被限流时返回 `RATE_LIMITED`，稍后再试即可。ISBN 走豆瓣的直达地址，不经过搜索。
 
-电影详情包括片名、年份、评分、导演、主演、类型、地区、语言、片长、集数、简介，以及“喜欢这部电影的人也喜欢”（`recommendations`）。某个数据来源失败时，保留其余来源的结果。
+电影详情包括片名、年份、评分、导演、主演、类型、地区、语言、片长、集数、简介，以及“喜欢这部电影的人也喜欢”（`recommendations`）。推荐或剧集集数读取失败时，不影响其余内容。
 
 ## 图书
 
@@ -45,7 +45,7 @@ douban reviews 1291546 --limit 5
 
 | 命令 | 能做什么 | 常用参数 |
 |---|---|---|
-| `douban book top250` | 豆瓣图书 Top250 | `--start`、`--limit` |
+| `douban book top250` | 豆瓣图书 Top250 | `--page`、`--limit`，支持交互翻页 |
 | `douban book chart [category]` | 当前热门图书榜，最多 20 条 | `--limit` |
 | `douban book new [category]` | 新书速递，最多 20 条 | `--limit`；别名 `latest` |
 | `douban book search <keyword>` | 按书名、作者或 ISBN 搜索 | `--start`、`--limit` |
@@ -63,7 +63,7 @@ douban reviews 1291546 --limit 5
 ```bash
 # 榜单与发现
 douban book chart 小说 --limit 10
-douban book top250 --start 25 --limit 20
+douban book top250 --page 2 --limit 25
 douban book latest 科学新知
 
 # 搜索、详情与内容
@@ -91,7 +91,7 @@ douban book export USER_ID --reading -f csv -o reading.csv
 | `douban user <userId>` | 指定用户的电影看过/想看/在看 | 自动复用本地登录态；默认看过，使用 `--wish` 或 `--doing` 切换 |
 | `douban book user <userId>` | 指定用户当前可见的图书读过/想读/在读 | 自动复用本地登录态；默认读过，使用 `--wish` 或 `--reading` 切换 |
 | `douban config` | 查看本地配置；`--user <id>` 设置 `me` 的默认用户 | 无需登录 |
-| `douban me` | 默认用户或当前登录账号的电影收藏 | 有默认用户时自动复用本地登录态、无登录态则匿名读取；否则先验证登录账号 |
+| `douban me` | `config --user` 指定的用户或当前登录账号的电影片单 | 默认看过，使用 `--wish` 或 `--doing` 切换；`--page`、`--limit` |
 | `douban list` | 热门豆列推荐 | 无需登录 |
 | `douban list <id-or-url>` | 读取豆列内容，自动翻页 | 无需登录；`--limit`（最多 1000）、`--start` |
 

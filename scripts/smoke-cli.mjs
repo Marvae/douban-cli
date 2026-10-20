@@ -116,7 +116,7 @@ assert.doesNotMatch(bookCommentsHelp.stdout, /--latest/);
 
 const legacyHotHelp = run('book', 'hot', '--help');
 assert.equal(legacyHotHelp.status, 0);
-assert.match(legacyHotHelp.stdout, /--start/);
+assert.match(legacyHotHelp.stdout, /--page/);
 
 const oversizedBookChart = run('book', 'chart', '--limit', '21', '--json');
 assert.equal(oversizedBookChart.status, 1);

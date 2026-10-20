@@ -127,7 +127,6 @@ function structuredErrorCode(error: unknown): CliErrorCode | undefined {
     if (structuredCode === 'NETWORK') return 'NETWORK_ERROR';
     if (structuredCode === 'INVALID_ARGUMENT') return 'INVALID_ARGUMENT';
     if (structuredCode === 'AUTH_REQUIRED') return 'AUTH_REQUIRED';
-    if (structuredCode === 'RATE_LIMITED') return 'RATE_LIMITED';
     if (structuredCode === 'HTTP_STATUS') {
       if (structuredStatus === 401) return 'AUTH_REQUIRED';
       if (structuredStatus === 404) return 'NOT_FOUND';
@@ -203,26 +202,31 @@ function isJsonOutputRequested(argv: readonly string[] = process.argv.slice(2)):
   return argv.includes('--json');
 }
 
+/** The next step depends on what failed; a command's own example only helps with argument mistakes. */
+function suggestRecovery(error: unknown, code: CliErrorCode, ctx: CommandErrorContext): string | undefined {
+  const sourceCode = error instanceof Error && 'code' in error ? error.code : undefined;
+  if (sourceCode === 'CHALLENGE') {
+    return '豆瓣要求安全验证，请暂停请求；可在浏览器中完成验证后再试，避免连续重试。';
+  }
+  if (code === 'RATE_LIMITED') {
+    return '豆瓣暂时限制了请求，请稍后再试，避免连续重试；未登录时更容易被限制，可先运行 douban login';
+  }
+  if (code === 'AUTH_REQUIRED') return '运行 douban login，复用浏览器里已登录的豆瓣';
+  if (code === 'NETWORK_ERROR') return '检查网络连接后重试';
+  return ctx.suggestion;
+}
+
 function createErrorPayload(error: unknown, ctx: CommandErrorContext): CliErrorPayload {
   const rawMessage = isCommanderError(error) ? translateCommanderMessage(toMessage(error)) : toMessage(error);
-  const message = redactSensitiveArguments(rawMessage);
+  const code = classifyError(error, rawMessage);
   const target = ctx.target ? redactSensitiveArguments(ctx.target) : undefined;
-  let recovery = ctx.suggestion;
-  if (error instanceof Error && 'code' in error) {
-    if (error.code === 'CHALLENGE') {
-      recovery = '豆瓣要求安全验证，请暂停请求；可在浏览器中完成验证后再试，避免连续重试。';
-    } else if (error.code === 'RATE_LIMITED') {
-      recovery = '豆瓣暂时限制了请求。未登录搜索最容易被限制：运行 douban login 后 CLI 会自动复用登录态；或稍后再试，避免连续重试。';
-    } else if (error.code === 'HTTP_STATUS' && 'status' in error && error.status === 429) {
-      recovery = '请求已被限流，请按服务端 Retry-After 指定的时间等待，避免连续重试。';
-    }
-  }
+  const recovery = suggestRecovery(error, code, ctx);
   const suggestion = recovery ? redactSensitiveArguments(recovery) : undefined;
   return {
     ok: false,
     error: {
-      code: classifyError(error, rawMessage),
-      message,
+      code,
+      message: redactSensitiveArguments(rawMessage),
       command: ctx.command,
       ...(target ? { target } : {}),
       ...(suggestion ? { suggestion } : {})
@@ -237,12 +241,12 @@ function printCliError(error: unknown, ctx: CommandErrorContext): void {
     return;
   }
 
-  const safeTarget = payload.error.target ? ` (${payload.error.target})` : '';
-  console.error(`❌ [${payload.error.code}] ${payload.error.message}${safeTarget}`);
-  if (ctx.options) {
+  const { code, message, target, suggestion } = payload.error;
+  console.error(`❌ [${code}] ${message}${target ? ` (${target})` : ''}`);
+  if (ctx.options && code === 'INVALID_ARGUMENT') {
     console.error(`   可选项：${redactSensitiveArguments(ctx.options)}`);
   }
-  console.error(`   提示：${payload.error.suggestion || '运行 douban --help 查看完整用法'}`);
+  console.error(`   提示：${suggestion || '运行 douban --help 查看完整用法'}`);
 }
 
 /** Report degraded or partial results on stderr so stdout JSON stays parseable. */

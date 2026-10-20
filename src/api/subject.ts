@@ -1,4 +1,4 @@
-import { cleanText, fetchJson, isRecord, ResponseSchemaError } from './common.js';
+import { cleanText, fetchJson, isRecord, normalizeTitle, ResponseSchemaError } from './common.js';
 import { debug } from '../utils/debug.js';
 
 export type SubjectKind = 'movie' | 'book';
@@ -18,7 +18,7 @@ export interface CollectionSubject {
 }
 
 /** Read a public mobile collection such as `movie_top250` or `movie_showing`. */
-export async function getSubjectCollection(
+async function getSubjectCollection(
   kind: SubjectKind,
   collection: string,
   start = 0,
@@ -61,13 +61,35 @@ export async function getSubjectCollection(
   return { items, total };
 }
 
-/** Public mobile Top250 page of 25 items, used when the desktop page is unavailable. */
-export async function getTop250Subjects(kind: SubjectKind, start: number): Promise<CollectionSubject[]> {
-  const { items } = await getSubjectCollection(kind, `${kind}_top250`, start);
-  if (items.length === 0 && start < 250) {
-    throw new ResponseSchemaError('Top250 移动榜单未返回条目', `https://m.douban.com/subject_collection/${kind}_top250`);
+/** Up to `limit` items of a public mobile collection, read 50 at a time. */
+export async function listSubjectCollection(
+  kind: SubjectKind,
+  collection: string,
+  start: number,
+  limit: number
+): Promise<CollectionSubject[]> {
+  const results: CollectionSubject[] = [];
+  let cursor = start;
+  while (results.length < limit) {
+    const { items, total } = await getSubjectCollection(kind, collection, cursor, Math.min(50, limit - results.length));
+    if (items.length === 0 && cursor < total) {
+      throw new ResponseSchemaError('移动榜单未返回条目', `https://m.douban.com/subject_collection/${collection}`);
+    }
+    results.push(...items);
+    cursor += items.length;
+    if (items.length === 0 || cursor >= total) break;
   }
-  return items;
+  return results.slice(0, limit);
+}
+
+/** Title of a movie, series or book from the public mobile API; used to label writes. */
+export async function getSubjectTitle(kind: SubjectKind, subjectId: string): Promise<string> {
+  const id = normalizeSubjectId(subjectId, kind);
+  const url = `https://m.douban.com/rexxar/api/v2/${kind}/${id}`;
+  const data = await fetchJson<unknown>(url, { Referer: mobileReferer(kind, id) });
+  const title = isRecord(data) && typeof data.title === 'string' ? normalizeTitle(data.title) : '';
+  if (!title) throw new ResponseSchemaError('条目接口未返回标题', url);
+  return title;
 }
 
 export interface SubjectRecommendation {
@@ -75,6 +97,34 @@ export interface SubjectRecommendation {
   title: string;
   rating: string;
   url: string;
+}
+
+/**
+ * "喜欢这部/本的人也喜欢": the page block when it parsed, otherwise the mobile API,
+ * which keeps working when pages demand verification. Never fails the caller.
+ */
+export async function resolveRecommendations(
+  kind: SubjectKind,
+  subjectId: string,
+  fromPage: SubjectRecommendation[] | undefined
+): Promise<SubjectRecommendation[]> {
+  if (fromPage && fromPage.length > 0) return fromPage;
+  const url = `https://m.douban.com/rexxar/api/v2/${kind}/${subjectId}/recommendations?count=10`;
+  try {
+    const data = await fetchJson<unknown>(url, { Referer: mobileReferer(kind, subjectId) });
+    if (!Array.isArray(data)) throw new ResponseSchemaError('推荐接口返回格式异常', url);
+    return data.filter(isRecord).flatMap((item): SubjectRecommendation[] => {
+      const id = String(item.id ?? '');
+      const title = typeof item.title === 'string' ? normalizeTitle(item.title) : '';
+      if (!/^\d+$/.test(id) || !title) return [];
+      const value = isRecord(item.rating) ? item.rating.value : undefined;
+      const rating = typeof value === 'number' && value > 0 ? value.toFixed(1) : '-';
+      return [{ id, title, rating, url: `https://${kind}.douban.com/subject/${id}/` }];
+    });
+  } catch (error) {
+    debug('subject', `推荐接口失败: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
 }
 
 /** Parse the "喜欢这部/本的人也喜欢" block; empty when the page has none. */

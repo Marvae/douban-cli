@@ -1,11 +1,10 @@
-import { BASE, cleanText, extractField, fetchHtml, fetchJson, HttpRequestError, isRecord, normalizeTitle, ResponseSchemaError } from './common.js';
+import { BASE, cleanText, fetchHtml, fetchJson, isRecord, normalizeTitle, ResponseSchemaError } from './common.js';
 import {
   getSubjectComments,
   getSubjectRatingStats,
-  getSubjectCollection,
   getSubjectReviews,
-  getTop250Subjects,
-  parseSubjectRecommendations,
+  listSubjectCollection,
+  resolveRecommendations,
   type SubjectCommentItem,
   type SubjectRecommendation,
   type SubjectPaginatedResult,
@@ -53,8 +52,9 @@ export interface MovieDetail {
   review_count: number;
   summary: string;
   url: string;
-  /** "喜欢这部电影的人也喜欢"; empty when the page block is unavailable. */
+  /** "喜欢这部电影的人也喜欢"; empty when no source provides it. */
   recommendations: SubjectRecommendation[];
+  type?: 'movie' | 'tv';
   episodes_count?: number;
   episodes_info?: string;
 }
@@ -67,27 +67,6 @@ export interface NowShowingItem {
   meta: string;
   url: string;
   cover: string;
-}
-
-interface MovieAbstractResponse {
-  r?: number;
-  subject?: {
-    title?: string;
-    year?: string;
-    original_title?: string;
-    rate?: string;
-    directors?: string[];
-    actors?: string[];
-    genres?: string[];
-    countries?: string[];
-    durations?: string[];
-    languages?: string[];
-    aka?: string[];
-    pubdate?: string[];
-    comment_count?: number;
-    review_count?: number;
-    url?: string;
-  };
 }
 
 interface MobileMovieResponse {
@@ -152,32 +131,6 @@ function splitSlashList(raw: string): string[] {
   return sanitizeList(raw.split('/').map((item) => item.trim()).filter(Boolean));
 }
 
-function parseCountFromText(raw: string): number {
-  const text = cleanText(raw).replace(/[，,]/g, '');
-  if (!text) return 0;
-
-  const wanMatch = text.match(/(\d+(?:\.\d+)?)\s*万/);
-  if (wanMatch) {
-    return Math.round(Number(wanMatch[1]) * 10000);
-  }
-
-  const numMatch = text.match(/(\d+)/);
-  return numMatch ? Number(numMatch[1]) : 0;
-}
-
-function extractCountByPath(html: string, path: 'comments' | 'reviews'): number {
-  const regex = new RegExp(`<a[^>]*href="[^"]*\\/${path}[^"]*"[^>]*>([\\s\\S]*?)<\\/a>`, 'g');
-  let max = 0;
-  let match;
-
-  while ((match = regex.exec(html)) !== null) {
-    const count = parseCountFromText(match[1]);
-    if (count > max) max = count;
-  }
-
-  return max;
-}
-
 function normalizeArrayField(value: unknown): string[] {
   if (Array.isArray(value)) {
     return sanitizeList(value);
@@ -188,241 +141,65 @@ function normalizeArrayField(value: unknown): string[] {
   return [];
 }
 
-function assignArrayIfNotEmpty(target: MovieDetail, key: keyof Pick<MovieDetail, 'genres' | 'countries' | 'durations' | 'languages' | 'aka' | 'pubdate'>, value: unknown): void {
-  const list = normalizeArrayField(value);
-  if (list.length > 0) {
-    target[key] = list;
-  }
+const MOBILE_API = 'https://m.douban.com/rexxar/api/v2';
+
+function personNames(people: MobileMovieResponse['directors']): string[] {
+  return Array.isArray(people) ? sanitizeList(people.map((person) => person?.name)) : [];
 }
 
-function assignArrayIfEmpty(target: MovieDetail, key: keyof Pick<MovieDetail, 'genres' | 'countries' | 'durations' | 'languages' | 'aka' | 'pubdate'>, value: unknown): void {
-  if (target[key].length === 0) assignArrayIfNotEmpty(target, key, value);
+function positiveInt(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : undefined;
 }
 
-function emptyMovieDetail(id: string, url: string): MovieDetail {
-  return {
-    id,
-    title: '',
-    year: '',
-    original_title: '',
-    rating: '-',
-    directors: [],
-    actors: [],
-    genres: [],
-    countries: [],
-    durations: [],
-    languages: [],
-    aka: [],
-    pubdate: [],
-    comment_count: 0,
-    review_count: 0,
-    summary: '',
-    url,
-    recommendations: []
-  };
-}
-
-function applyAbstractDetail(detail: MovieDetail, response: MovieAbstractResponse): void {
-  const subject = response.subject;
-  if (!subject) return;
-  if (!detail.title && subject.title) detail.title = normalizeTitle(subject.title);
-  if (!detail.year && subject.year) detail.year = cleanText(subject.year);
-  if (!detail.original_title && subject.original_title) detail.original_title = normalizeTitle(subject.original_title);
-  if (detail.rating === '-' && subject.rate) detail.rating = subject.rate;
-  if (detail.directors.length === 0 && Array.isArray(subject.directors)) {
-    detail.directors = sanitizeList(subject.directors);
-  }
-  if (detail.actors.length === 0 && Array.isArray(subject.actors)) {
-    detail.actors = sanitizeList(subject.actors);
-  }
-  assignArrayIfEmpty(detail, 'genres', subject.genres);
-  assignArrayIfEmpty(detail, 'countries', subject.countries);
-  assignArrayIfEmpty(detail, 'durations', subject.durations);
-  assignArrayIfEmpty(detail, 'languages', subject.languages);
-  assignArrayIfEmpty(detail, 'aka', subject.aka);
-  assignArrayIfEmpty(detail, 'pubdate', subject.pubdate);
-  if (detail.comment_count === 0 && typeof subject.comment_count === 'number' && Number.isFinite(subject.comment_count)) {
-    detail.comment_count = Math.max(0, Math.trunc(subject.comment_count));
-  }
-  if (detail.review_count === 0 && typeof subject.review_count === 'number' && Number.isFinite(subject.review_count)) {
-    detail.review_count = Math.max(0, Math.trunc(subject.review_count));
-  }
-}
-
-function applyMobileDetail(detail: MovieDetail, response: MobileMovieResponse): void {
-  if (response.title) detail.title = normalizeTitle(response.title);
-  if (response.year) detail.year = cleanText(String(response.year));
-  if (response.original_title) detail.original_title = normalizeTitle(response.original_title);
-  // Douban reports unrated titles as 0.
-  if (typeof response.rating?.value === 'number' && Number.isFinite(response.rating.value) && response.rating.value > 0) {
-    detail.rating = response.rating.value.toFixed(1);
-  }
-  if (detail.directors.length === 0 && Array.isArray(response.directors)) {
-    detail.directors = response.directors.map((person) => cleanText(person.name || '')).filter(Boolean);
-  }
-  if (detail.actors.length === 0 && Array.isArray(response.actors)) {
-    detail.actors = response.actors.map((person) => cleanText(person.name || '')).filter(Boolean);
-  }
-  assignArrayIfEmpty(detail, 'genres', response.genres);
-  assignArrayIfEmpty(detail, 'countries', response.countries);
-  assignArrayIfEmpty(detail, 'durations', response.durations);
-  assignArrayIfEmpty(detail, 'languages', response.languages);
-  assignArrayIfEmpty(detail, 'aka', response.aka);
-  assignArrayIfEmpty(detail, 'pubdate', response.pubdate);
-  if (detail.comment_count === 0 && typeof response.comment_count === 'number' && Number.isFinite(response.comment_count)) {
-    detail.comment_count = Math.max(0, Math.trunc(response.comment_count));
-  }
-  if (detail.review_count === 0 && typeof response.review_count === 'number' && Number.isFinite(response.review_count)) {
-    detail.review_count = Math.max(0, Math.trunc(response.review_count));
-  }
-  if (!detail.summary && response.intro) detail.summary = cleanText(response.intro);
-  if (typeof response.episodes_count === 'number' && Number.isFinite(response.episodes_count) && response.episodes_count > 0) {
-    detail.episodes_count = Math.trunc(response.episodes_count);
-  }
-  if (!detail.episodes_info && response.episodes_info) detail.episodes_info = cleanText(response.episodes_info);
-}
-
-function parseMovieDetailFromHtml(id: string, html: string): MovieDetail | null {
-  const titleMatch = html.match(/<span\s+property="v:itemreviewed"[^>]*>([\s\S]*?)<\/span>/);
-  const yearMatch = html.match(/<span[^>]*class="year"[^>]*>([\s\S]*?)<\/span>/);
-  const ratingMatch = html.match(/<strong[^>]*property="v:average"[^>]*>([\s\S]*?)<\/strong>/);
-  const infoMatch = html.match(/<div id="info"[^>]*>([\s\S]*?)<\/div>/);
-  const infoHtml = infoMatch ? infoMatch[1] : '';
-
-  const directors: string[] = [];
-  const directorRegex = /<a[^>]*rel="v:directedBy"[^>]*>([\s\S]*?)<\/a>/g;
-  let directorMatch;
-  while ((directorMatch = directorRegex.exec(html)) !== null) {
-    directors.push(cleanText(directorMatch[1]));
-  }
-
-  const actors: string[] = [];
-  const actorRegex = /<a[^>]*rel="v:starring"[^>]*>([\s\S]*?)<\/a>/g;
-  let actorMatch;
-  while ((actorMatch = actorRegex.exec(html)) !== null) {
-    actors.push(cleanText(actorMatch[1]));
-  }
-
-  const genres: string[] = [];
-  const genreRegex = /<span[^>]*property="v:genre"[^>]*>([\s\S]*?)<\/span>/g;
-  let genreMatch;
-  while ((genreMatch = genreRegex.exec(html)) !== null) {
-    genres.push(cleanText(genreMatch[1]));
-  }
-
-  const durations: string[] = [];
-  const runtimeRegex = /<span[^>]*property="v:runtime"[^>]*>([\s\S]*?)<\/span>/g;
-  let runtimeMatch;
-  while ((runtimeMatch = runtimeRegex.exec(html)) !== null) {
-    durations.push(cleanText(runtimeMatch[1]));
-  }
-
-  const pubdate: string[] = [];
-  const pubdateRegex = /<span[^>]*property="v:initialReleaseDate"[^>]*>([\s\S]*?)<\/span>/g;
-  let pubdateMatch;
-  while ((pubdateMatch = pubdateRegex.exec(html)) !== null) {
-    pubdate.push(cleanText(pubdateMatch[1]));
-  }
-
-  let summary = '';
-  const summaryMatch = html.match(/<span[^>]*property="v:summary"[^>]*>([\s\S]*?)<\/span>/);
-  if (summaryMatch) {
-    summary = cleanText(summaryMatch[1]);
-  }
-
-  const title = titleMatch ? normalizeTitle(titleMatch[1]) : '';
-  if (!title) return null;
-
-  const yearText = yearMatch ? cleanText(yearMatch[1]).match(/(19|20)\d{2}/)?.[0] || '' : '';
-  const originalTitle = extractField(infoHtml, '原名');
-  const countries = splitSlashList(extractField(infoHtml, '制片国家/地区'));
-  const languages = splitSlashList(extractField(infoHtml, '语言'));
-  const aka = splitSlashList(extractField(infoHtml, '又名'));
-  const durationsFromInfo = splitSlashList(extractField(infoHtml, '片长'));
-  const pubdateFromInfo = splitSlashList(extractField(infoHtml, '上映日期'));
-  const episodesInfo = extractField(infoHtml, '集数');
-  const episodesCountMatch = episodesInfo.match(/\d+/);
-  const episodesCount = episodesCountMatch ? Number(episodesCountMatch[0]) : 0;
-
-  return {
-    id,
-    title,
-    year: yearText,
-    original_title: originalTitle || '',
-    rating: (ratingMatch ? cleanText(ratingMatch[1]) : '') || '-',
-    directors,
-    actors,
-    genres: sanitizeList(genres),
-    countries,
-    durations: sanitizeList(durations.length > 0 ? durations : durationsFromInfo),
-    languages,
-    aka,
-    pubdate: sanitizeList(pubdate.length > 0 ? pubdate : pubdateFromInfo),
-    comment_count: extractCountByPath(html, 'comments'),
-    review_count: extractCountByPath(html, 'reviews'),
-    summary,
-    url: `${BASE}/subject/${id}/`,
-    recommendations: parseSubjectRecommendations(html, 'movie'),
-    episodes_count: episodesCount > 0 ? episodesCount : undefined,
-    episodes_info: episodesInfo || undefined
-  };
-}
-
-/**
- * Get movie detail by subject id.
- * Parse subject page first; if blocked, fallback to public JSON endpoints.
- */
+/** Movie or series detail from the mobile API; series take their episode count from the TV endpoint. */
 export async function getMovieDetail(id: string): Promise<MovieDetail> {
   const movieId = id.trim();
   if (!/^\d+$/.test(movieId)) throw new Error('电影 ID 必须是纯数字');
 
-  const subjectUrl = `${BASE}/subject/${movieId}/`;
-  const [htmlResult, abstractResult, mobileResult] = await Promise.allSettled([
-    fetchHtml(subjectUrl, { Referer: BASE }).then((html) => {
-      const parsed = parseMovieDetailFromHtml(movieId, html);
-      if (!parsed) throw new ResponseSchemaError('电影详情页未解析出标题', subjectUrl);
-      return parsed;
-    }),
-    fetchJson<MovieAbstractResponse>(`${BASE}/j/subject_abstract?subject_id=${movieId}`, { Referer: BASE }),
-    fetchJson<MobileMovieResponse>(`https://m.douban.com/rexxar/api/v2/movie/${movieId}`, {
-      Referer: `https://m.douban.com/movie/subject/${movieId}/`
-    })
+  const url = `${MOBILE_API}/movie/${movieId}`;
+  const headers = { Referer: `https://m.douban.com/movie/subject/${movieId}/` };
+  const [data, recommendations] = await Promise.all([
+    fetchJson<MobileMovieResponse>(url, headers),
+    resolveRecommendations('movie', movieId, [])
   ]);
+  const title = normalizeTitle(data?.title ?? '');
+  if (!title) throw new ResponseSchemaError('电影详情接口未返回标题', url);
 
-  const detail = htmlResult.status === 'fulfilled'
-    ? { ...htmlResult.value }
-    : emptyMovieDetail(movieId, subjectUrl);
+  const rating = data.rating?.value;
+  const detail: MovieDetail = {
+    id: movieId,
+    title,
+    type: data.type === 'tv' ? 'tv' : 'movie',
+    year: cleanText(String(data.year ?? '')),
+    original_title: normalizeTitle(data.original_title ?? ''),
+    // Douban reports unrated titles as 0.
+    rating: typeof rating === 'number' && rating > 0 ? rating.toFixed(1) : '-',
+    directors: personNames(data.directors),
+    actors: personNames(data.actors),
+    genres: normalizeArrayField(data.genres),
+    countries: normalizeArrayField(data.countries),
+    durations: normalizeArrayField(data.durations),
+    languages: normalizeArrayField(data.languages),
+    aka: normalizeArrayField(data.aka),
+    pubdate: normalizeArrayField(data.pubdate),
+    comment_count: positiveInt(data.comment_count) ?? 0,
+    review_count: positiveInt(data.review_count) ?? 0,
+    summary: cleanText(data.intro ?? ''),
+    url: `${BASE}/subject/${movieId}/`,
+    recommendations,
+    episodes_count: positiveInt(data.episodes_count),
+    episodes_info: cleanText(data.episodes_info ?? '') || undefined
+  };
 
-  if (htmlResult.status === 'rejected') {
-    debug('movie', `主页面解析失败: ${htmlResult.reason instanceof Error ? htmlResult.reason.message : String(htmlResult.reason)}`);
-  }
-  if (abstractResult.status === 'fulfilled') {
-    applyAbstractDetail(detail, abstractResult.value);
-  } else {
-    debug('movie', `subject_abstract 回退失败: ${abstractResult.reason instanceof Error ? abstractResult.reason.message : String(abstractResult.reason)}`);
-  }
-
-  let mobile: MobileMovieResponse | undefined;
-  if (mobileResult.status === 'fulfilled') {
-    mobile = mobileResult.value;
-    applyMobileDetail(detail, mobile);
-  } else {
-    debug('movie', `mobile API 回退失败: ${mobileResult.reason instanceof Error ? mobileResult.reason.message : String(mobileResult.reason)}`);
-  }
-
-  const shouldFetchTv = mobile?.type === 'tv' && !detail.episodes_count;
-  if (shouldFetchTv) {
+  if (detail.type === 'tv' && !detail.episodes_count) {
     try {
-      const tv = await fetchJson<MobileMovieResponse>(`https://m.douban.com/rexxar/api/v2/tv/${movieId}`, {
-        Referer: `https://m.douban.com/movie/subject/${movieId}/`
-      });
-      applyMobileDetail(detail, tv);
+      const tv = await fetchJson<MobileMovieResponse>(`${MOBILE_API}/tv/${movieId}`, headers);
+      detail.episodes_count = positiveInt(tv.episodes_count);
+      detail.episodes_info = cleanText(tv.episodes_info ?? '') || detail.episodes_info;
     } catch (error) {
-      debug('movie', `TV API 补充失败: ${error instanceof Error ? error.message : String(error)}`);
+      debug('movie', `剧集接口失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-
-  if (!detail.title) throw new Error(`获取电影详情失败，ID=${movieId}`);
   return detail;
 }
 
@@ -518,11 +295,13 @@ export const GENRES: Record<string, number> = {
  * Get Top250
  */
 export interface Top250Item {
+  id: string;
   rank: number;
   title: string;
   year: string;
   rating: string;
   director: string;
+  /** One-line tagline; the mobile list has it for only some titles. */
   quote: string;
   url: string;
 }
@@ -530,99 +309,21 @@ export interface Top250Item {
 export async function getTop250(start = 0, limit = 25): Promise<Top250Item[]> {
   if (!Number.isInteger(start) || start < 0) throw new Error('start 必须是非负整数');
   if (!Number.isInteger(limit) || limit <= 0) return [];
-  const results: Top250Item[] = [];
-  const seen = new Set<string>();
-  let pageStart = start;
-  let useMobile = false;
-
-  while (results.length < limit) {
-    let html = '';
-    if (!useMobile) {
-      try {
-        html = await fetchHtml(`${BASE}/top250?start=${pageStart}`);
-      } catch (error) {
-        if (error instanceof HttpRequestError && error.status === 429) throw error;
-        debug('movie', `Top250 桌面页不可用，改用移动榜单: ${error instanceof Error ? error.message : String(error)}`);
-        useMobile = true;
-      }
-    }
-    if (useMobile) {
-      const page = await getTop250Subjects('movie', pageStart);
-      let added = 0;
-      for (const item of page) {
-        if (seen.has(item.url)) continue;
-        seen.add(item.url);
-        const parts = item.meta.split('/').map((part) => part.trim());
-        results.push({
-          rank: item.rank, title: item.title, rating: item.rating, quote: item.description,
-          year: parts[0]?.match(/\d{4}/)?.[0] || '-',
-          director: parts.length >= 5 ? parts[3] || '-' : '-',
-          url: item.url
-        });
-        added += 1;
-        if (results.length >= limit) break;
-      }
-      if (added === 0 || page.length < 25 || pageStart + 25 >= 250) break;
-      pageStart += 25;
-      continue;
-    }
-
-    // Split by item blocks
-    const items = html.split('<div class="item">').slice(1);
-    if (items.length === 0) {
-      if (pageStart < 250) {
-        throw new ResponseSchemaError('电影 Top250 页面未解析出预期条目', `${BASE}/top250?start=${pageStart}`);
-      }
-      break;
-    }
-
-    let added = 0;
-    for (const item of items) {
-      if (results.length >= limit) break;
-
-      // Extract rank
-      const rankMatch = item.match(/<em[^>]*>(\d+)<\/em>/);
-      const rank = rankMatch ? Number(rankMatch[1]) : 0;
-
-      // Extract URL and title
-      const urlMatch = item.match(/href="(https:\/\/movie\.douban\.com\/subject\/\d+\/)"/);
-      const titleMatch = item.match(/<span class="title">([^<]+)<\/span>/);
-      if (!urlMatch || !titleMatch) continue;
-
-      const url = urlMatch[1];
-      if (seen.has(url)) continue;
-      seen.add(url);
-
-      // Extract rating
-      const ratingMatch = item.match(/<span class="rating_num"[^>]*>([^<]+)<\/span>/);
-      const rating = ratingMatch ? cleanText(ratingMatch[1]) : '-';
-
-      // Extract info line (director, year)
-      const infoMatch = item.match(/<div class="bd">[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/);
-      const infoLine = infoMatch ? cleanText(infoMatch[1].replace(/<br\s*\/?>/g, ' ')) : '';
-      const dirMatch = infoLine.match(/导演:\s*([^主&]+)/);
-      const yearMatch = infoLine.match(/(\d{4})/);
-
-      // Extract quote
-      const quoteMatch = item.match(/<p class="quote">[\s\S]*?<span[^>]*>([^<]*)<\/span>/);
-
-      results.push({
-        rank,
-        title: cleanText(titleMatch[1]),
-        year: yearMatch ? yearMatch[1] : '-',
-        rating,
-        director: dirMatch ? cleanText(dirMatch[1]) : '-',
-        quote: quoteMatch ? cleanText(quoteMatch[1]) : '',
-        url
-      });
-      added += 1;
-    }
-
-    if (added === 0 || pageStart + 25 >= 250) break;
-    pageStart += 25;
-  }
-
-  return results;
+  const items = await listSubjectCollection('movie', 'movie_top250', start, Math.min(limit, 250 - start));
+  return items.map((item) => {
+    // card_subtitle: 1994 / 美国 / 剧情 犯罪 / 弗兰克·德拉邦特 / 蒂姆·罗宾斯 摩根·弗里曼
+    const parts = item.meta.split('/').map((part) => part.trim());
+    return {
+      id: item.id,
+      rank: item.rank,
+      title: item.title,
+      year: parts[0]?.match(/\d{4}/)?.[0] || '-',
+      rating: item.rating,
+      director: parts.length >= 5 ? parts[3] || '-' : '-',
+      quote: item.description,
+      url: item.url
+    };
+  });
 }
 
 /**
@@ -662,17 +363,10 @@ export async function getComing(limit = 20): Promise<ComingItem[]> {
  */
 export async function getNowShowing(limit = 20): Promise<NowShowingItem[]> {
   if (!Number.isInteger(limit) || limit <= 0) return [];
-  const results: NowShowingItem[] = [];
-  let start = 0;
-  while (results.length < limit) {
-    const { items, total } = await getSubjectCollection('movie', 'movie_showing', start, Math.min(50, limit - results.length));
-    for (const { id, title, rating, release_date, meta, url, cover } of items) {
-      results.push({ id, title, rating, release_date: release_date ?? '-', meta, url, cover });
-    }
-    start += items.length;
-    if (items.length === 0 || start >= total) break;
-  }
-  return results.slice(0, limit);
+  const items = await listSubjectCollection('movie', 'movie_showing', 0, limit);
+  return items.map(({ id, title, rating, release_date, meta, url, cover }) => (
+    { id, title, rating, release_date: release_date ?? '-', meta, url, cover }
+  ));
 }
 
 /**

@@ -12,15 +12,16 @@ const authMocks = vi.hoisted(() => ({
   getOptionalSessionCookies: vi.fn()
 }));
 
-vi.mock('../api/account.js', () => ({
+vi.mock('../api/collection.js', () => ({
   getUserCollectionPageWithSession: apiMocks.getUserCollectionPage
 }));
-vi.mock('../auth.js', () => authMocks);
-vi.mock('../utils/spinner.js', () => ({
+vi.mock('../auth/index.js', () => authMocks);
+vi.mock('../ui/spinner.js', () => ({
   withSpinner: vi.fn(async (_message: string, task: () => Promise<unknown>) => task())
 }));
 
-import { registerUserCommands } from '../commands/user.ts';
+import { registerCollectionCommands } from '../commands/collection.ts';
+import { registerConfigCommand } from '../commands/config.ts';
 
 const originalArgv = process.argv;
 const originalHome = process.env.HOME;
@@ -44,11 +45,12 @@ afterEach(() => {
 function createProgram(): Command {
   const program = new Command();
   program.exitOverride();
-  registerUserCommands(program);
+  registerCollectionCommands(program, program.command('book'));
+  registerConfigCommand(program);
   return program;
 }
 
-describe('user command', () => {
+describe('collection and config commands', () => {
   it('uses --page to request the correct JSON result window', async () => {
     apiMocks.getUserCollectionPage.mockResolvedValue({
       items: [{ kind: 'movie', id: '42', title: 'Example' }],
@@ -147,6 +149,7 @@ describe('user command', () => {
       accountName: 'Alice',
       updatedAt: '2026-08-10T00:00:00.000Z'
     });
+    authMocks.getOptionalSessionCookies.mockResolvedValue('dbcl2=secret');
     apiMocks.getUserCollectionPage.mockResolvedValue({
       items: [], total: 0, nextStart: null, partial: false, warnings: []
     });
@@ -156,9 +159,8 @@ describe('user command', () => {
 
     expect(authMocks.ensureAuth).toHaveBeenCalledOnce();
     expect(apiMocks.getUserCollectionPage).toHaveBeenCalledWith({
-      kind: 'movie', userId: 'alice', status: 'collect', start: 0, count: 30
+      kind: 'movie', userId: 'alice', status: 'collect', start: 0, count: 15
     }, 'dbcl2=secret');
-    expect(authMocks.getOptionalSessionCookies).not.toHaveBeenCalled();
   });
 
   it.each([undefined, 'dbcl2=cached-account'])('reads the configured user with the optional session %s', async (cookies) => {
@@ -177,7 +179,7 @@ describe('user command', () => {
 
     expect(authMocks.ensureAuth).not.toHaveBeenCalled();
     expect(apiMocks.getUserCollectionPage).toHaveBeenCalledWith({
-      kind: 'movie', userId: 'alice', status: 'collect', start: 0, count: 30
+      kind: 'movie', userId: 'alice', status: 'collect', start: 0, count: 15
     }, cookies);
   });
 

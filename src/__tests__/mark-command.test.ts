@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   removeSubjectRecord: vi.fn()
 }));
 
-vi.mock('../auth.js', () => ({
+vi.mock('../auth/index.js', () => ({
   ensureAuth: mocks.ensureAuth
 }));
 vi.mock('../api/record.js', () => ({
@@ -16,7 +16,7 @@ vi.mock('../api/record.js', () => ({
   getSubjectRecord: mocks.getSubjectRecord,
   removeSubjectRecord: mocks.removeSubjectRecord
 }));
-vi.mock('../utils/spinner.js', () => ({
+vi.mock('../ui/spinner.js', () => ({
   withSpinner: vi.fn(async (_message: string, task: () => Promise<unknown>) => task())
 }));
 

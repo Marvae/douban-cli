@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { withPagination } from '../utils/pagination.ts';
+import { withPagination } from '../ui/pagination.ts';
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -21,7 +21,7 @@ function createReadline(answers: string[]) {
   };
 }
 
-describe('utils/pagination', () => {
+describe('pagination', () => {
   it('loads one page and exits when the user enters q', async () => {
     const { readline, question, close } = createReadline(['q']);
     const fetchPage = vi.fn().mockResolvedValue({ items: ['a'], total: 2, hasMore: true });

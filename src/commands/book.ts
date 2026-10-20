@@ -4,7 +4,6 @@ import {
   BOOK_LATEST_CATEGORIES,
   getBookChart,
   getBookComments,
-  getBookHot,
   getBookInfo,
   getBookNotes,
   getBookRatingStats,
@@ -16,8 +15,8 @@ import {
   searchBooks,
   type BookItem
 } from '../api/book.js';
-import { getOptionalSessionCookies } from '../auth.js';
-import { CliArgumentError, printWarnings, withErrorHandler } from '../utils/error.js';
+import { getOptionalSessionCookies } from '../auth/index.js';
+import { printWarnings, withErrorHandler } from '../utils/error.js';
 import {
   getPageRange,
   isNumericId,
@@ -26,45 +25,40 @@ import {
   parsePositiveInt,
   parsePositiveIntAtMost
 } from '../utils/parsing.js';
-import { withPagination } from '../utils/pagination.js';
-import { withSpinner } from '../utils/spinner.js';
-import { registerBookCollectionCommands } from './book-collection.js';
-
-function compactNumber(value: number): string {
-  if (!Number.isFinite(value) || value < 0) return '-';
-  if (value >= 10000) {
-    const scaled = Math.round((value / 10000) * 10) / 10;
-    return `${Number.isInteger(scaled) ? scaled.toFixed(0) : scaled.toFixed(1)}万`;
-  }
-  return value.toLocaleString();
-}
+import { withPagination } from '../ui/pagination.js';
+import { withSpinner } from '../ui/spinner.js';
+import {
+  compactNumber,
+  formatTrend,
+  printListHeading,
+  printPosts,
+  printRatingBars,
+  renderTable,
+  subjectLabel,
+  type TableColumn
+} from '../ui/output.js';
 
 function renderBookList(items: BookItem[], heading: string, offset = 0): void {
   console.log(`\n${heading}\n`);
   if (items.length === 0) {
-    console.log('暂无结果。');
+    console.log('暂无结果');
     return;
   }
-
-  items.forEach((item, index) => {
-    const ordinal = item.rank || offset + index + 1;
-    const rating = item.rating && item.rating !== '-' ? ` ⭐${item.rating}` : '';
-    const votes = item.votes && item.votes !== '-' ? ` (${item.votes})` : '';
-    let trend = '';
-    if (item.trend?.startsWith('up')) trend = ` 🔺${item.trend.replace('up', '').trim()}`;
-    if (item.trend?.startsWith('down')) trend = ` 🔻${item.trend.replace('down', '').trim()}`;
-    if (item.trend === 'stay') trend = ' —';
-
-    console.log(`${ordinal.toString().padStart(2)}. ${item.title}${rating}${votes}${trend}`);
-    console.log(`    ${item.meta || '-'}`);
-    console.log(`    ID: ${item.id}`);
-    if (item.tags && item.tags.length > 0) {
-      console.log(`    标签: ${item.tags.join(' / ')}`);
-    }
-  });
+  const trendColumn: TableColumn<BookItem>[] = items.some((item) => item.trend)
+    ? [{ header: '变化', value: (item) => formatTrend(item.trend) || '—' }]
+    : [];
+  renderTable(items, [
+    { header: '#', value: (item, index) => String(item.rank || offset + index + 1), minWidth: 2 },
+    { header: '书名', value: (item) => item.title, maxWidth: 24 },
+    { header: '评分', value: (item) => item.rating },
+    { header: '评价', value: (item) => compactNumber(Number(item.votes?.match(/\d+/)?.[0] ?? Number.NaN)) },
+    ...trendColumn,
+    { header: '作者 / 出版', value: (item) => item.meta, maxWidth: 30 },
+    { header: 'ID', value: (item) => item.id }
+  ]);
 }
 
-async function resolveBookId(input: string, outputJson: boolean): Promise<string> {
+async function resolveBook(input: string, outputJson: boolean): Promise<{ id: string; title?: string }> {
   const query = input.trim();
   if (!query) throw new Error('书籍 ID、ISBN 或关键词不能为空');
 
@@ -73,9 +67,9 @@ async function resolveBookId(input: string, outputJson: boolean): Promise<string
   if (isbn) {
     const id = await resolveBookIdByIsbn(isbn);
     if (!outputJson) console.log(`\n🔎 ISBN ${isbn} 对应条目 ${id}`);
-    return id;
+    return { id };
   }
-  if (isNumericId(query) && query.length < 10) return query;
+  if (isNumericId(query) && query.length < 10) return { id: query };
 
   const warnings: string[] = [];
   const cookies = await getOptionalSessionCookies();
@@ -88,10 +82,8 @@ async function resolveBookId(input: string, outputJson: boolean): Promise<string
     return title === normalizedQuery || primaryTitle === normalizedQuery;
   }) || candidates[0];
   if (!matched?.id) throw new Error(`未找到书籍：${query}`);
-  if (!outputJson) {
-    console.log(`\n🔎 已匹配为: ${matched.title} (${matched.id})`);
-  }
-  return matched.id;
+  if (!outputJson) console.log(`\n🔎 已匹配为 ${subjectLabel(matched.id, matched.title)}`);
+  return { id: matched.id, title: matched.title };
 }
 
 function registerTop250Command(book: Command, name: 'hot' | 'top250'): void {
@@ -99,26 +91,38 @@ function registerTop250Command(book: Command, name: 'hot' | 'top250'): void {
   book
     .command(name, { hidden: legacy })
     .description(legacy ? '获取热门书籍（兼容旧版，等同 Top250）' : '获取豆瓣图书 Top250')
-    .option('-s, --start <n>', '起始偏移', '0')
-    .option('-n, --limit <n>', '返回数量', '20')
+    .option('-p, --page <n>', '页码（从 1 开始）', '1')
+    .option('-n, --limit <n>', '每页数量', '25')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler({
       command: `book ${name}`,
-      suggestion: legacy
-        ? '推荐改用：douban book top250 -n 30'
-        : '可尝试：douban book top250 -n 30'
+      suggestion: '可尝试：douban book top250 -n 10 --page 2'
     }, async (opts) => {
-      const start = parseNonNegativeInt(opts.start, '--start', 0);
-      if (start >= 250) throw new CliArgumentError('--start 必须小于 250（Top250 共 250 本）');
-      const limit = parsePositiveInt(opts.limit, '--limit', 20);
-      const items = await withSpinner(
+      const total = 250;
+      const limit = parsePositiveIntAtMost(opts.limit, '--limit', 25, total);
+      const page = parsePositiveIntAtMost(opts.page, '--page', 1, Math.ceil(total / limit));
+      const load = (currentPage: number, spinner: boolean) => withSpinner(
         '正在获取图书 Top250...',
-        () => legacy ? getBookHot(start, limit) : getBookTop250(start, limit),
-        !opts.json
+        () => getBookTop250(pageToOffset(currentPage, limit), limit),
+        spinner
       );
 
-      if (opts.json) console.log(JSON.stringify(items, null, 2));
-      else renderBookList(items, legacy ? '📚 热门书籍 · Top250' : '📚 豆瓣图书 Top250', start);
+      if (opts.json) {
+        console.log(JSON.stringify(await load(page, false), null, 2));
+        return;
+      }
+      await withPagination({
+        startPage: page,
+        pageSize: limit,
+        fetchPage: async (currentPage) => {
+          const items = await load(currentPage, true);
+          return { items, total, hasMore: pageToOffset(currentPage, limit) + items.length < total };
+        },
+        renderPage: (items, currentPage) => {
+          const { from, to } = getPageRange(currentPage, limit, items.length);
+          renderBookList(items, `📚 豆瓣图书 Top250 · 第 ${from}-${to} 本`, pageToOffset(currentPage, limit));
+        }
+      });
     }));
 }
 
@@ -212,7 +216,7 @@ export function registerBookCommands(program: Command): Command {
       target: `书籍: ${String(args[0])}`,
       suggestion: '可尝试：douban book info 三体'
     }), async (query, opts) => {
-      const id = await resolveBookId(query, Boolean(opts.json));
+      const { id } = await resolveBook(query, Boolean(opts.json));
       const detail = await withSpinner(
         '正在获取书籍详情...',
         () => getBookInfo(id),
@@ -260,7 +264,7 @@ export function registerBookCommands(program: Command): Command {
       target: `书籍: ${String(args[0])}`,
       suggestion: '可尝试：douban book rating 三体'
     }), async (query, opts) => {
-      const id = await resolveBookId(query, Boolean(opts.json));
+      const { id } = await resolveBook(query, Boolean(opts.json));
       const stats = await withSpinner(
         '正在获取书籍评分分布...',
         () => getBookRatingStats(id),
@@ -273,12 +277,7 @@ export function registerBookCommands(program: Command): Command {
       }
 
       console.log(`\n⭐ 评分分布 (${stats.value}分，${compactNumber(stats.count)}人评价)\n`);
-      const labels = ['5星', '4星', '3星', '2星', '1星'];
-      const maxPercent = Math.max(...stats.stars, 0);
-      stats.stars.slice().reverse().forEach((percent, index) => {
-        const barLength = maxPercent > 0 ? Math.round((percent / maxPercent) * 30) : 0;
-        console.log(`${labels[index]} ${'█'.repeat(barLength)} ${percent}%`);
-      });
+      printRatingBars(stats.stars);
       console.log(`\n想读: ${compactNumber(stats.wish_count)}`);
       console.log(`在读: ${compactNumber(stats.doing_count)}`);
       console.log(`读过: ${compactNumber(stats.done_count)}`);
@@ -295,7 +294,7 @@ export function registerBookCommands(program: Command): Command {
       target: `书籍: ${String(args[0])}`,
       suggestion: '可尝试：douban book comments 三体'
     }), async (query, opts) => {
-      const id = await resolveBookId(query, Boolean(opts.json));
+      const { id, title } = await resolveBook(query, Boolean(opts.json));
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const page = parsePositiveInt(opts.page, '--page', 1);
 
@@ -320,14 +319,8 @@ export function registerBookCommands(program: Command): Command {
         renderPage: (items, currentPage, total) => {
           const start = pageToOffset(currentPage, limit);
           const { from, to } = getPageRange(currentPage, limit, items.length);
-          console.log(`\n💬 热门短评 (${id})`);
-          console.log(`共 ${(total || 0).toLocaleString()} 条，当前第 ${from}-${to} 条\n`);
-          items.forEach((item, index) => {
-            const stars = item.rating > 0 ? '⭐'.repeat(item.rating) : '';
-            console.log(`${(start + index + 1).toString().padStart(2)}. ${item.user} ${stars} 👍${item.votes}`);
-            console.log(`    ${item.content}`);
-            console.log(`    ${item.time}\n`);
-          });
+          printListHeading(`💬 热门短评 · ${subjectLabel(id, title)}`, total, from, to);
+          printPosts(items, start);
         }
       });
     }));
@@ -343,7 +336,7 @@ export function registerBookCommands(program: Command): Command {
       target: `书籍: ${String(args[0])}`,
       suggestion: '可尝试：douban book reviews 三体 -n 5'
     }), async (query, opts) => {
-      const id = await resolveBookId(query, Boolean(opts.json));
+      const { id, title } = await resolveBook(query, Boolean(opts.json));
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const page = parsePositiveInt(opts.page, '--page', 1);
 
@@ -364,12 +357,8 @@ export function registerBookCommands(program: Command): Command {
         renderPage: (items, currentPage, total) => {
           const start = pageToOffset(currentPage, limit);
           const { from, to } = getPageRange(currentPage, limit, items.length);
-          console.log(`\n📝 热门书评 (${id})`);
-          console.log(`共 ${(total || 0).toLocaleString()} 条，当前第 ${from}-${to} 条\n`);
-          items.forEach((item, index) => {
-            console.log(`${(start + index + 1).toString().padStart(2)}. ${item.user} ⭐${item.rating} 👍${item.votes} ${item.time}`);
-            console.log(`    ${item.content}\n`);
-          });
+          printListHeading(`📝 热门书评 · ${subjectLabel(id, title)}`, total, from, to);
+          printPosts(items, start);
         }
       });
     }));
@@ -385,7 +374,7 @@ export function registerBookCommands(program: Command): Command {
       target: `书籍: ${String(args[0])}`,
       suggestion: '可尝试：douban book notes 三体 -n 5'
     }), async (query, opts) => {
-      const id = await resolveBookId(query, Boolean(opts.json));
+      const { id, title } = await resolveBook(query, Boolean(opts.json));
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const page = parsePositiveInt(opts.page, '--page', 1);
 
@@ -406,8 +395,8 @@ export function registerBookCommands(program: Command): Command {
         renderPage: (items, currentPage, total) => {
           const start = pageToOffset(currentPage, limit);
           const { from, to } = getPageRange(currentPage, limit, items.length);
-          console.log(`\n📒 读书笔记 (${id})`);
-          console.log(`共 ${(total || 0).toLocaleString()} 条，当前第 ${from}-${to} 条\n`);
+          printListHeading(`📒 读书笔记 · ${subjectLabel(id, title)}`, total, from, to);
+          if (items.length === 0) console.log('暂无内容');
           items.forEach((item, index) => {
             console.log(`${(start + index + 1).toString().padStart(2)}. ${item.user} · ${item.chapter}`);
             console.log(`    ${item.content}`);
@@ -417,6 +406,5 @@ export function registerBookCommands(program: Command): Command {
       });
     }));
 
-  registerBookCollectionCommands(book);
   return book;
 }

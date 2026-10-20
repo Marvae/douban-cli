@@ -87,7 +87,7 @@ describe('authentication safety', () => {
   it('optional session lookup stays offline when no cache exists', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
     await expect(auth.getOptionalSessionCookies()).resolves.toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -95,7 +95,7 @@ describe('authentication safety', () => {
   it('optional session lookup reuses a valid cache without verifying it again', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice')));
     vi.stubGlobal('fetch', fetchMock);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
     await auth.loginFromCookieStdin(cookieStdin('dbcl2=mock-account; ck=mock-csrf'));
     fetchMock.mockClear();
 
@@ -109,7 +109,7 @@ describe('authentication safety', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     mkdirSync(path.dirname(authCachePath()), { recursive: true });
     writeFileSync(authCachePath(), '{broken-cache', { mode: 0o600 });
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await expect(auth.getOptionalSessionCookies()).resolves.toBeUndefined();
     process.env.DOUBAN_CLI_HOME = 'invalid-relative-path';
@@ -120,7 +120,7 @@ describe('authentication safety', () => {
   it('optional session lookup ignores unreadable cache paths', async () => {
     mkdirSync(authCachePath(), { recursive: true });
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
     await expect(auth.getOptionalSessionCookies()).resolves.toBeUndefined();
     expect(lstatSync(authCachePath()).isDirectory()).toBe(true);
   });
@@ -129,7 +129,7 @@ describe('authentication safety', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'))));
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
     await auth.loginFromCookieStdin(cookieStdin('dbcl2=mock-account'));
     vi.setSystemTime(new Date('2026-02-01T00:00:01.000Z'));
     await expect(auth.getOptionalSessionCookies()).resolves.toBeUndefined();
@@ -139,14 +139,14 @@ describe('authentication safety', () => {
   it('ensureAuth uses only the local cache and never scans browsers implicitly', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
-    await expect(auth.ensureAuth()).rejects.toThrow('请先运行 douban login');
+    await expect(auth.ensureAuth()).rejects.toThrow('还没有登录豆瓣');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('parses a copied Cookie request header while discarding unrelated cookies', async () => {
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     expect(auth.parseCookieHeader(
       'Cookie: bid=unused; ck=manual-csrf; dbcl2="manual-account"; ll="108288"'
@@ -166,13 +166,13 @@ describe('authentication safety', () => {
     ['malformed segment', 'dbcl2=manual-account; invalid-segment'],
     ['oversized input', `dbcl2=${'x'.repeat(16 * 1024)}`]
   ])('rejects unsafe manual Cookie headers: %s', async (_label, header) => {
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     expect(auth.parseCookieHeader(header)).toBeNull();
   });
 
   it('parses active Douban cookies from Netscape cookies.txt', async () => {
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
     const contents = [
       '# Netscape HTTP Cookie File',
       netscapeCookieLine('dbcl2', 'wrong-domain', { domain: '.example.com' }),
@@ -209,7 +209,7 @@ describe('authentication safety', () => {
       netscapeCookieLine('dbcl2', 'second')
     ].join('\n')]
   ])('rejects invalid Netscape auth cookies: %s', async (_label, contents) => {
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     expect(auth.parseNetscapeCookies(contents)).toBeNull();
   });
@@ -217,7 +217,7 @@ describe('authentication safety', () => {
   it('imports a Cookie header only from explicit non-TTY stdin and stores it privately', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     const session = await auth.loginFromCookieStdin(cookieStdin(
       'Cookie: dbcl2="manual-account"; ck=manual-csrf; bid=discarded\n'
@@ -238,7 +238,7 @@ describe('authentication safety', () => {
   it('rejects TTY, empty, oversized, and injected stdin before verification', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await expect(auth.loginFromCookieStdin(cookieStdin('dbcl2=manual-account', true)))
       .rejects.toThrow('只接受管道或重定向输入');
@@ -262,7 +262,7 @@ describe('authentication safety', () => {
     ].join('\n'));
     const fetchMock = vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     const session = await auth.loginFromCookieFile(cookieFile);
 
@@ -283,7 +283,7 @@ describe('authentication safety', () => {
     writeFileSync(oversizedCookieFile, 'x'.repeat(128 * 1024 + 1));
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await expect(auth.loginFromCookieFile(tempHome))
       .rejects.toThrow('必须是普通文件');
@@ -300,7 +300,7 @@ describe('authentication safety', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('unauthorized', { status: 401 }));
     vi.stubGlobal('fetch', fetchMock);
     const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await expect(auth.loginFromCookieStdin(cookieStdin(
       'dbcl2=must-not-leak; ck=must-also-not-leak'
@@ -320,7 +320,7 @@ describe('authentication safety', () => {
       warnings: []
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 })));
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     const session = await auth.loginFromBrowserCookies(
       { browser: 'chrome', profile: 'Profile 2' },
@@ -359,7 +359,7 @@ describe('authentication safety', () => {
       warnings: []
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 })));
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await auth.loginFromBrowserCookies({ browser: 'chrome', cookieTimeoutMs: 120_000 }, reader);
 
@@ -381,7 +381,7 @@ describe('authentication safety', () => {
     vi.doMock('@steipete/sweet-cookie', () => ({ getCookies }));
     vi.stubGlobal('fetch', vi.fn(async () => new Response(profileHtml('alice', 'Alice'), { status: 200 })));
     Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await auth.loginWithBrowser({ browser: 'chrome' });
 
@@ -408,7 +408,7 @@ describe('authentication safety', () => {
     vi.doMock('@steipete/sweet-cookie', () => ({ getCookies }));
     vi.stubGlobal('fetch', vi.fn(async () => new Response(profileHtml('alice', 'Alice'), { status: 200 })));
     Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await expect(auth.loginWithBrowser({ browser: 'chrome' })).resolves.toMatchObject({ accountId: 'alice' });
     expect(question.mock.calls[1]?.[0]).toContain('要在 Chrome 中打开豆瓣登录页吗');
@@ -427,7 +427,7 @@ describe('authentication safety', () => {
     const { DatabaseSync } = await import('node:sqlite');
     const db = new DatabaseSync(path.join(profileDir, 'Cookies'));
     db.exec("CREATE TABLE cookies (host_key TEXT, name TEXT, encrypted_value BLOB); INSERT INTO cookies VALUES ('.douban.com', 'dbcl2', x'00')");
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await expect(auth.hasStoredDoubanLogin('arc', undefined, 'darwin', tempHome)).resolves.toBe(true);
     db.exec("DELETE FROM cookies");
@@ -449,7 +449,7 @@ describe('authentication safety', () => {
     }));
     vi.doMock('@steipete/sweet-cookie', () => ({ getCookies }));
     Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await expect(auth.loginWithBrowser({ open: true }))
       .rejects.toThrow('douban login 需要交互式终端');
@@ -469,7 +469,7 @@ describe('authentication safety', () => {
       default: { createInterface: () => ({ question, close }) }
     }));
     vi.doMock('@steipete/sweet-cookie', () => ({ getCookies }));
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await expect(auth.loginWithBrowser({
       browser: 'chrome',
@@ -537,7 +537,7 @@ describe('authentication safety', () => {
   });
 
   it('opens the current-account page in the selected browser', async () => {
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     expect(auth.resolveLoginLaunchCommand('darwin', 'arc')).toEqual({
       command: 'open',
@@ -550,7 +550,7 @@ describe('authentication safety', () => {
   });
 
   it('limits Arc cookie extraction to macOS', async () => {
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     expect(auth.resolveBrowserCookieTarget('arc', 'darwin')).toEqual({
       backend: 'chrome',
@@ -565,7 +565,7 @@ describe('authentication safety', () => {
   });
 
   it('rejects interactive login from a pipe or CI input', async () => {
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     expect(() => auth.assertInteractiveLogin(false)).toThrow('douban login 需要交互式终端');
     expect(() => auth.assertInteractiveLogin(true)).not.toThrow();
@@ -573,7 +573,7 @@ describe('authentication safety', () => {
   });
 
   it('maps supported system browser identifiers to cookie backends', async () => {
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     expect(auth.browserFromSystemIdentifier('company.thebrowser.browser')).toBe('arc');
     expect(auth.browserFromSystemIdentifier('com.google.Chrome')).toBe('chrome');
@@ -590,7 +590,7 @@ describe('authentication safety', () => {
     });
     const fetchMock = vi.fn(async () => new Response(profileHtml('alice', 'Alice'), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
     await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
     fetchMock.mockClear();
 
@@ -618,7 +618,7 @@ describe('authentication safety', () => {
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 })));
     const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
 
@@ -631,7 +631,7 @@ describe('authentication safety', () => {
 
   it('reports a broken sweet-cookie module instead of treating it as no cookies', async () => {
     vi.doMock('@steipete/sweet-cookie', () => ({}));
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await expect(auth.loginFromBrowserCookies({ browser: 'chrome' }))
       .rejects.toThrow('加载浏览器 Cookie 组件失败');
@@ -649,7 +649,7 @@ describe('authentication safety', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await expect(auth.loginFromBrowserCookies({ browser: 'chrome' }, reader as never))
       .rejects.toThrow('未找到可验证的豆瓣登录态');
@@ -670,7 +670,7 @@ describe('authentication safety', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('unauthorized', { status: 401 }));
     vi.stubGlobal('fetch', fetchMock);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await expect(auth.loginFromBrowserCookies({ browser: 'chrome' }, reader))
       .rejects.toMatchObject({ code: 'HTTP_STATUS', status: 401 });
@@ -689,7 +689,7 @@ describe('authentication safety', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await expect(auth.loginFromBrowserCookies({ browser: 'chrome' }, reader))
       .rejects.toThrow('未找到可验证的豆瓣登录态');
@@ -715,7 +715,7 @@ describe('authentication safety', () => {
     });
     const fetchMock = vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
 
@@ -742,7 +742,7 @@ describe('authentication safety', () => {
         { status: 200 }
       );
     }));
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await expect(auth.loginFromBrowserCookies({}, reader as never))
       .rejects.toThrow('检测到多个豆瓣账号');
@@ -760,7 +760,7 @@ describe('authentication safety', () => {
     });
     const fetchMock = vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
     await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
 
     fetchMock.mockResolvedValue(new Response(profileHtml('bob', 'Bob'), { status: 200 }));
@@ -777,7 +777,7 @@ describe('authentication safety', () => {
       warnings: []
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 })));
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
     await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
 
     renameSync(authCachePath(), legacyAuthCachePath());
@@ -796,7 +796,7 @@ describe('authentication safety', () => {
       warnings: []
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 })));
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
     await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
 
     const cachePayload = JSON.parse(readFileSync(authCachePath(), 'utf8')) as Record<string, unknown>;
@@ -815,7 +815,7 @@ describe('authentication safety', () => {
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 })));
     const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
     await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
     renameSync(authCachePath(), legacyAuthCachePath());
 
@@ -835,7 +835,7 @@ describe('authentication safety', () => {
       warnings: []
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 })));
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
     await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
     writeFileSync(legacyAuthCachePath(), '{leftover-legacy-cache', { mode: 0o600 });
 
@@ -850,7 +850,7 @@ describe('authentication safety', () => {
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 })));
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
     await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
     renameSync(authCachePath(), legacyAuthCachePath());
     mkdirSync(path.dirname(authCachePath()), { recursive: true });
@@ -864,7 +864,7 @@ describe('authentication safety', () => {
   it('does not delete a cache path when the failure is not a cache-format error', async () => {
     mkdirSync(authCachePath(), { recursive: true });
     const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
 
     await expect(auth.detectAuthSession()).resolves.toBeNull();
     expect(lstatSync(authCachePath()).isDirectory()).toBe(true);
@@ -880,7 +880,7 @@ describe('authentication safety', () => {
       warnings: []
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 })));
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
     await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
 
     vi.setSystemTime(new Date('2026-02-01T00:00:01.000Z'));
@@ -898,7 +898,7 @@ describe('authentication safety', () => {
       warnings: []
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 })));
-    const auth = await import('../auth.ts');
+    const auth = await import('../auth/index.ts');
     await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
 
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));

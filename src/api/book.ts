@@ -4,25 +4,19 @@ import {
   fetchHtml,
   fetchHtmlPage,
   fetchJson,
-  HttpRequestError,
   isRecord,
   normalizeTitle,
   ResponseSchemaError,
-  withOptionalSession,
   type SessionReadOptions
 } from './common.js';
-import {
-  parseBookDetailHtml,
-  parseBookMediaList,
-  parseBookSearchPage,
-  parseBookTop250Page,
-  type ParsedBookDetail
-} from './book-parsers.js';
+import { parseBookDetailHtml, parseBookMediaList, type ParsedBookDetail } from './book-parsers.js';
+import { searchSubjects } from './search.js';
 import {
   getSubjectComments,
   getSubjectRatingStats,
   getSubjectReviews,
-  getTop250Subjects,
+  listSubjectCollection,
+  resolveRecommendations,
   type SubjectPaginatedResult,
   type SubjectRecommendation,
   type SubjectCommentItem,
@@ -154,59 +148,11 @@ function normalizeCount(value: unknown): number {
   return Number.isFinite(count) && count >= 0 ? Math.trunc(count) : 0;
 }
 
-/**
- * Get Douban Book Top250.
- */
+/** Douban Book Top250 from the public mobile collection. */
 export async function getBookTop250(start = 0, limit = 20): Promise<BookItem[]> {
   if (!Number.isInteger(start) || start < 0) throw new Error('start 必须是非负整数');
   if (!Number.isInteger(limit) || limit <= 0) return [];
-
-  const results: BookItem[] = [];
-  const seen = new Set<string>();
-  let pageStart = start;
-  let useMobile = false;
-
-  while (results.length < limit) {
-    let pageItems: BookItem[];
-    try {
-      if (useMobile) {
-        pageItems = await getTop250Subjects('book', pageStart);
-      } else {
-        const html = await fetchHtml(`${BOOK_BASE}/top250?start=${pageStart}`, { Referer: BOOK_BASE });
-        pageItems = parseBookTop250Page(html);
-      }
-    } catch (error) {
-      if (useMobile) throw error;
-      if (error instanceof HttpRequestError && error.status === 429) throw error;
-      debug('book', `Top250 桌面页不可用，改用移动榜单: ${error instanceof Error ? error.message : String(error)}`);
-      useMobile = true;
-      pageItems = await getTop250Subjects('book', pageStart);
-    }
-    if (pageItems.length === 0 && pageStart < 250) {
-      throw new ResponseSchemaError('图书 Top250 页面未解析出预期条目', `${BOOK_BASE}/top250?start=${pageStart}`);
-    }
-    let added = 0;
-    for (const item of pageItems) {
-      if (seen.has(item.id)) continue;
-      seen.add(item.id);
-      results.push(item);
-      added += 1;
-      if (results.length >= limit) break;
-    }
-
-    if (added === 0 || pageItems.length < 25 || pageStart + 25 >= 250) break;
-    pageStart += 25;
-  }
-
-  return results;
-}
-
-/**
- * Keep the original public API behavior for callers that used `getBookHot` as
- * a Top250 data source before v0.4.0.
- */
-export function getBookHot(start = 0, limit = 20): Promise<BookItem[]> {
-  return getBookTop250(start, limit);
+  return listSubjectCollection('book', 'book_top250', start, Math.min(limit, 250 - start));
 }
 
 /**
@@ -252,41 +198,6 @@ export async function getLatestBooks(category = '全部', limit = 20): Promise<B
   return items.slice(0, limit);
 }
 
-async function searchBookSuggestions(keyword: string, limit: number, options: SessionReadOptions): Promise<BookSearchItem[]> {
-  const url = `${BOOK_BASE}/j/subject_suggest?q=${encodeURIComponent(keyword)}`;
-  const response = await withOptionalSession(options, (session) => (
-    fetchJson<unknown>(url, { Referer: `${BOOK_BASE}/`, ...session })
-  ));
-
-  if (!Array.isArray(response)) {
-    throw new ResponseSchemaError('图书建议接口返回格式异常', `${BOOK_BASE}/j/subject_suggest`);
-  }
-  const items = response.filter(isRecord);
-  if (response.length > 0 && items.length === 0) {
-    throw new ResponseSchemaError('图书建议接口未返回有效条目', url);
-  }
-  return items
-    .filter((item) => typeof item.type !== 'string' || item.type === 'b')
-    .map((item) => {
-      const id = typeof item.id === 'string' || typeof item.id === 'number' ? String(item.id).trim() : '';
-      const year = typeof item.year === 'string' || typeof item.year === 'number' ? String(item.year) : undefined;
-      const author = cleanText(typeof item.author_name === 'string' ? item.author_name : '');
-      return {
-        id,
-        title: normalizeTitle(typeof item.title === 'string' ? item.title : ''),
-        rating: '-',
-        votes: '-',
-        meta: [author, year].filter(Boolean).join(' / ') || '-',
-        year,
-        url: typeof item.url === 'string' ? item.url : `${BOOK_BASE}/subject/${id}/`,
-        cover: typeof item.pic === 'string' ? item.pic : undefined,
-        abstract: author
-      };
-    })
-    .filter((item) => item.id && item.title)
-    .slice(0, limit);
-}
-
 /** Normalize an ISBN-10 or ISBN-13 (hyphens and spaces allowed), or return null. */
 export function parseIsbn(input: string): string | null {
   const compact = input.replace(/[\s-]/g, '').toUpperCase();
@@ -304,72 +215,23 @@ export async function resolveBookIdByIsbn(isbn: string): Promise<string> {
   return id;
 }
 
-/** Search books by keyword, aggregating Douban's 15-item pages up to the limit. */
 export async function searchBooks(
   keyword: string,
   start = 0,
   limit = 20,
   options: SessionReadOptions = {}
 ): Promise<BookSearchItem[]> {
-  const query = keyword.trim();
-  if (!query) return [];
-  if (!Number.isInteger(start) || start < 0) throw new Error('start 必须是非负整数');
-  if (!Number.isInteger(limit) || limit <= 0) return [];
-
-  const results: BookSearchItem[] = [];
-  const seen = new Set<string>();
-  let pageStart = start;
-  let firstPageError: unknown;
-  const maxPages = Math.min(50, Math.max(1, Math.ceil(limit / 15) + 3));
-
-  for (let pageNumber = 0; pageNumber < maxPages && results.length < limit; pageNumber += 1) {
-    const url = `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(query)}&cat=1001&start=${pageStart}`;
-    try {
-      const html = await withOptionalSession(options, (session) => fetchHtml(url, { Referer: 'https://www.douban.com/', ...session }));
-
-      const page = parseBookSearchPage(html, url);
-      if (page.start !== pageStart) {
-        throw new ResponseSchemaError(`图书搜索分页起点异常：请求 ${pageStart}，返回 ${page.start}`, url);
-      }
-      for (const item of page.items) {
-        if (!item.id || seen.has(item.id)) continue;
-        seen.add(item.id);
-        results.push({ ...item });
-        if (results.length >= limit) break;
-      }
-      if (page.count <= 0 || pageStart + page.count >= page.total) break;
-      const nextStart = pageStart + page.count;
-      if (nextStart <= pageStart) throw new ResponseSchemaError('图书搜索分页游标没有前进', url);
-      pageStart = nextStart;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (results.length === 0) {
-        firstPageError = error;
-      } else {
-        options.warnings?.push(`后续搜索页读取失败，结果可能不完整：${message}`);
-      }
-      debug('book', `${results.length > 0 ? '后续搜索页失败，保留已有结果' : '完整搜索失败，准备回退建议接口'}: ${message}`);
-      break;
-    }
-  }
-
-  if (results.length > 0) return results.slice(0, limit);
-  if (start > 0) {
-    if (firstPageError) throw firstPageError;
-    return [];
-  }
-  try {
-    const suggestions = await searchBookSuggestions(query, limit, options);
-    if (suggestions.length === 0 && firstPageError) throw firstPageError;
-    if (firstPageError) {
-      const reason = firstPageError instanceof Error ? firstPageError.message : String(firstPageError);
-      options.warnings?.push(`完整搜索不可用（${reason}），以下为联想结果，可能不完整且缺少评分`);
-    }
-    return suggestions;
-  } catch (suggestionError) {
-    if (firstPageError) throw firstPageError;
-    throw suggestionError;
-  }
+  const results = await searchSubjects('book', keyword, start, limit, options);
+  return results.map((item) => ({
+    id: item.id,
+    title: item.title,
+    rating: item.rating,
+    votes: item.votes > 0 ? `${item.votes}人评价` : '-',
+    meta: item.subtitle || '-',
+    year: item.year,
+    url: item.url,
+    cover: item.cover
+  }));
 }
 
 interface MobileBookResponse {
@@ -500,7 +362,7 @@ export async function getBookInfo(id: string): Promise<BookDetail> {
     series: mobileSeries || (html?.series ? { ...html.series } : null),
     has_ebook: mobile?.has_ebook === true,
     url: cleanText(mobile?.url || '') || url,
-    recommendations: html?.recommendations ?? []
+    recommendations: await resolveRecommendations('book', bookId, html?.recommendations)
   };
 }
 

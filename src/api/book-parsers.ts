@@ -1,12 +1,4 @@
-import {
-  assertSearchAvailable,
-  cleanText,
-  extractField,
-  extractWindowJsonObject,
-  isRecord,
-  normalizeTitle,
-  ResponseSchemaError
-} from './common.js';
+import { cleanText, extractField, normalizeTitle } from './common.js';
 import { parseSubjectRecommendations, type SubjectRecommendation } from './subject.js';
 
 export interface ParsedBookListItem {
@@ -21,13 +13,6 @@ export interface ParsedBookListItem {
   rank?: number;
   trend?: string;
   tags?: string[];
-}
-
-export interface ParsedBookSearchPage {
-  items: Array<ParsedBookListItem & { year?: string }>;
-  start: number;
-  count: number;
-  total: number;
 }
 
 export interface ParsedBookDetail {
@@ -72,39 +57,6 @@ function parseVotes(block: string): string {
   const match = block.match(/<span[^>]*class=["'][^"']*\bpl\b[^"']*["'][^>]*>\s*\(([\s\S]*?)\)\s*<\/span>/i)
     || block.match(/<span[^>]*class=["'][^"']*color-gray[^"']*["'][^>]*>\s*\(([\s\S]*?)\)\s*<\/span>/i);
   return match ? cleanText(match[1]) : '-';
-}
-
-export function parseBookTop250Page(html: string): ParsedBookListItem[] {
-  const results: ParsedBookListItem[] = [];
-  const tableRegex = /<table\b[^>]*width=["']100%["'][^>]*>([\s\S]*?)<\/table>/gi;
-  let tableMatch: RegExpExecArray | null;
-
-  while ((tableMatch = tableRegex.exec(html)) !== null) {
-    const block = tableMatch[1];
-    const linkMatch = block.match(/<a[^>]*href=["'](https:\/\/book\.douban\.com\/subject\/(\d+)\/)["'][^>]*title=["']([^"']+)["'][^>]*>/i)
-      || block.match(/<a[^>]*title=["']([^"']+)["'][^>]*href=["'](https:\/\/book\.douban\.com\/subject\/(\d+)\/)["'][^>]*>/i);
-    if (!linkMatch) continue;
-
-    const alternateOrder = /^https:/.test(linkMatch[1] || '');
-    const url = alternateOrder ? linkMatch[1] : linkMatch[2];
-    const id = alternateOrder ? linkMatch[2] : linkMatch[3];
-    const title = alternateOrder ? linkMatch[3] : linkMatch[1];
-    const ratingMatch = block.match(/<span[^>]*class=["'][^"']*rating_nums[^"']*["'][^>]*>([\s\S]*?)<\/span>/i);
-    const metaMatch = block.match(/<p[^>]*class=["'][^"']*\bpl\b[^"']*["'][^>]*>([\s\S]*?)<\/p>/i);
-    const coverMatch = block.match(/<img[^>]*src=["']([^"']+)["']/i);
-
-    results.push({
-      id,
-      title: normalizeTitle(title),
-      rating: ratingMatch ? cleanText(ratingMatch[1]) : '-',
-      votes: parseVotes(block),
-      meta: metaMatch ? cleanText(metaMatch[1]) : '-',
-      url,
-      cover: coverMatch?.[1]
-    });
-  }
-
-  return results;
 }
 
 export function parseBookMediaList(html: string): ParsedBookListItem[] {
@@ -153,72 +105,6 @@ export function parseBookMediaList(html: string): ParsedBookListItem[] {
   }
 
   return results;
-}
-
-function readPaginationValue(
-  data: Record<string, unknown>,
-  field: 'start' | 'count' | 'total',
-  url: string
-): number {
-  const value = data[field];
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
-    throw new ResponseSchemaError(`图书搜索页 __DATA__.${field} 不是非负整数`, url);
-  }
-  return value;
-}
-
-export function parseBookSearchPage(
-  html: string,
-  url = 'https://search.douban.com/book/subject_search'
-): ParsedBookSearchPage {
-  const rawData = extractWindowJsonObject(html, '__DATA__');
-  if (!rawData) throw new ResponseSchemaError('图书搜索页未找到完整的 __DATA__ JSON 数据', url);
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawData);
-  } catch (error) {
-    throw new ResponseSchemaError(
-      `图书搜索页 __DATA__ 解析失败: ${error instanceof Error ? error.message : String(error)}`,
-      url,
-      rawData.slice(0, 240)
-    );
-  }
-  if (!isRecord(parsed) || !Array.isArray(parsed.items)) {
-    throw new ResponseSchemaError('图书搜索页 __DATA__.items 不是数组', url, rawData.slice(0, 240));
-  }
-  assertSearchAvailable(parsed, url);
-
-  const items = parsed.items
-    .filter(isRecord)
-    .filter((item) => item.tpl_name === 'search_subject' && typeof item.url === 'string')
-    .map((item) => {
-      const rating = isRecord(item.rating) ? item.rating.value : undefined;
-      const ratingValue = typeof rating === 'number' && Number.isFinite(rating) && rating > 0 ? rating.toFixed(1) : '-';
-      const abstract = typeof item.abstract === 'string' ? item.abstract : '';
-      const yearMatch = abstract.match(/(19|20)\d{2}/);
-      return {
-        id: typeof item.id === 'string' || typeof item.id === 'number' ? String(item.id).trim() : '',
-        title: normalizeTitle(typeof item.title === 'string' ? item.title : ''),
-        rating: ratingValue,
-        votes: '-',
-        meta: cleanText(abstract) || '-',
-        year: yearMatch?.[0],
-        url: item.url as string,
-        cover: typeof item.cover_url === 'string' ? item.cover_url : undefined,
-        abstract: cleanText(abstract)
-      };
-    })
-    .filter((item) => item.id && item.title);
-
-  const start = readPaginationValue(parsed, 'start', url);
-  const count = readPaginationValue(parsed, 'count', url);
-  const total = readPaginationValue(parsed, 'total', url);
-  if (count > 0 && items.length === 0 && start < total) {
-    throw new ResponseSchemaError('图书搜索页声明有结果但未解析出任何书籍', url, rawData.slice(0, 240));
-  }
-
-  return { items, start, count, total };
 }
 
 function extractSection(html: string, heading: string): string {
