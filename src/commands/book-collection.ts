@@ -6,6 +6,7 @@ import type {
   UserCollectionPage
 } from '../api/collection.js';
 import { getOptionalSessionCookies } from '../auth.js';
+import { resolveCurrentUser } from './user.js';
 import { getUserCollectionPageWithSession } from '../api/account.js';
 import { secureAtomicWriteFile } from '../storage/secure-file.js';
 import { withErrorHandler } from '../utils/error.js';
@@ -59,14 +60,14 @@ function formatRating(rating: number): string {
 
 function renderBookCollection(
   items: UserCollectionItem[],
-  userId: string,
+  owner: string,
   statusLabel: string,
   page: number,
   limit: number,
   hasMore: boolean
 ): void {
   const start = pageToOffset(page, limit);
-  console.log(`\n📚 用户 ${userId} · ${statusLabel}（第 ${page} 页）\n`);
+  console.log(`\n📚 ${owner} · ${statusLabel}（第 ${page} 页）\n`);
 
   if (items.length === 0) {
     console.log('暂无记录');
@@ -261,6 +262,61 @@ function serializeBookCollectionJson(
   }, null, 2)}\n`;
 }
 
+async function showBookCollection(
+  userId: string,
+  opts: BookCollectionOptions & { page?: string; limit?: string; json?: boolean },
+  owner = `用户 ${userId}`
+): Promise<void> {
+  const { status, label: statusLabel } = resolveBookCollectionStatus(opts);
+  const page = parsePositiveInt(opts.page, '--page', 1);
+  const limit = parsePositiveInt(opts.limit, '--limit', DEFAULT_PAGE_SIZE);
+  const start = pageToOffset(page, limit);
+  // Reuse the local session to include collections visible only when signed in.
+  const cookies = await getOptionalSessionCookies();
+
+  if (opts.json) {
+    const result = await withSpinner(
+      `正在获取用户 ${userId} 的${statusLabel}书单...`,
+      () => getUserCollectionPageWithSession({ kind: 'book', userId, status, start, count: limit }, cookies),
+      false
+    );
+    emitWarnings(result);
+    console.log(JSON.stringify(result.items, null, 2));
+    return;
+  }
+
+  await withPagination({
+    startPage: page,
+    pageSize: limit,
+    fetchPage: async (currentPage) => {
+      const currentStart = pageToOffset(currentPage, limit);
+      const result = await withSpinner(
+        `正在获取用户 ${userId} 的${statusLabel}书单...`,
+        () => getUserCollectionPageWithSession(
+          {
+            kind: 'book',
+            userId,
+            status,
+            start: currentStart,
+            count: limit
+          },
+          cookies
+        ),
+        true
+      );
+      emitWarnings(result);
+      return {
+        items: result.items,
+        total: result.total,
+        hasMore: result.nextStart !== null
+      };
+    },
+    renderPage: (items, currentPage, _total, hasMore) => {
+      renderBookCollection(items, owner, statusLabel, currentPage, limit, hasMore);
+    }
+  });
+}
+
 export function registerBookCollectionCommands(book: Command): void {
   book
     .command('user <userId>')
@@ -274,55 +330,22 @@ export function registerBookCollectionCommands(book: Command): void {
       command: 'book user',
       target: `用户ID: ${String(args[0] || '未指定')}`,
       suggestion: '可尝试：douban book user <userId> --wish'
-    }), async (userId, opts) => {
-      const { status, label: statusLabel } = resolveBookCollectionStatus(opts);
-      const page = parsePositiveInt(opts.page, '--page', 1);
-      const limit = parsePositiveInt(opts.limit, '--limit', DEFAULT_PAGE_SIZE);
-      const start = pageToOffset(page, limit);
-      // Reuse the local session to include collections visible only when signed in.
-      const cookies = await getOptionalSessionCookies();
+    }), (userId, opts) => showBookCollection(userId, opts)));
 
-      if (opts.json) {
-        const result = await withSpinner(
-          `正在获取用户 ${userId} 的${statusLabel}书单...`,
-          () => getUserCollectionPageWithSession({ kind: 'book', userId, status, start, count: limit }, cookies),
-          false
-        );
-        emitWarnings(result);
-        console.log(JSON.stringify(result.items, null, 2));
-        return;
-      }
-
-      await withPagination({
-        startPage: page,
-        pageSize: limit,
-        fetchPage: async (currentPage) => {
-          const currentStart = pageToOffset(currentPage, limit);
-          const result = await withSpinner(
-            `正在获取用户 ${userId} 的${statusLabel}书单...`,
-            () => getUserCollectionPageWithSession(
-              {
-                kind: 'book',
-                userId,
-                status,
-                start: currentStart,
-                count: limit
-              },
-              cookies
-            ),
-            true
-          );
-          emitWarnings(result);
-          return {
-            items: result.items,
-            total: result.total,
-            hasMore: result.nextStart !== null
-          };
-        },
-        renderPage: (items, currentPage, _total, hasMore) => {
-          renderBookCollection(items, userId, statusLabel, currentPage, limit, hasMore);
-        }
-      });
+  book
+    .command('me')
+    .description('查看我的图书收藏（默认读过）')
+    .option('--wish', '查看“想读”列表')
+    .option('--reading', '查看“在读”列表')
+    .option('-p, --page <n>', '页码（从 1 开始）', String(1))
+    .option('-n, --limit <n>', '每页数量', String(DEFAULT_PAGE_SIZE))
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'book me',
+      suggestion: '可先运行 douban login 或 douban config --user <id>'
+    }, async (opts) => {
+      const { userId } = await resolveCurrentUser(!opts.json);
+      await showBookCollection(userId, opts, '我的书单');
     }));
 
   book

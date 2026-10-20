@@ -54,6 +54,7 @@ douban reviews 1291546 --limit 5
 | `douban book comments <query>` | 热门短评 | `--page`、`--limit` |
 | `douban book reviews <query>` | 热门书评 | `--page`、`--limit` |
 | `douban book notes <query>` | 热门读书笔记 | `--page`、`--limit` |
+| `douban book me` | 我的想读/在读/读过书单（`config --user` 指定的用户或当前登录账号） | `--wish`、`--reading`、`--page`、`--limit` |
 | `douban book user <userId>` | 指定用户当前可见的想读/在读/读过书单 | `--wish`、`--reading`、`--page`、`--limit` |
 | `douban book export <userId>` | 将当前可见的书单导出到文件 | `--wish`、`--reading`、`--limit`、`--output`、`--format`、`--delay` |
 

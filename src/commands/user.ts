@@ -98,6 +98,22 @@ function writeConfig(config: CliConfig): void {
   secureAtomicWriteFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
 }
 
+/**
+ * The user for `me` and `book me`: the configured `config --user`, otherwise
+ * the signed-in account.
+ */
+export async function resolveCurrentUser(showSpinner: boolean): Promise<{ userId: string; cookies?: string }> {
+  const configured = readConfig().user?.trim();
+  if (configured) return { userId: configured, cookies: await getOptionalSessionCookies() };
+  try {
+    const auth = await withSpinner('正在识别当前登录用户...', () => ensureAuth(), showSpinner);
+    return { userId: auth.accountId, cookies: auth.cookies };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${message}。也可以运行 douban config --user <id> 指定默认用户`, { cause: error });
+  }
+}
+
 export function registerUserCommands(program: Command): void {
   program
     .command('user <userId>')
@@ -242,29 +258,8 @@ export function registerUserCommands(program: Command): void {
       suggestion: '可先运行 douban login 或 douban config --user <id>'
     }, async (opts) => {
       const { status, label: statusLabel } = resolveCollectionStatus(opts);
-      const config = readConfig();
-      let userId = config.user?.trim();
-      let cookies: string | undefined;
-
-      if (!userId) {
-        try {
-          const auth = await withSpinner('正在识别当前登录用户...', () => ensureAuth(), !opts.json);
-          userId = auth.accountId;
-          cookies = auth.cookies;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          throw new Error(`本地登录态无法识别当前账号：${message}。请重新运行 douban login 或配置 --user`, {
-            cause: error
-          });
-        }
-      }
-
+      const { userId, cookies } = await resolveCurrentUser(!opts.json);
       const limit = parsePositiveInt(opts.limit, '--limit', 30);
-      if (!userId) {
-        throw new Error('无法识别当前用户，请先运行 douban login 或 douban config --user <id>');
-      }
-
-      cookies ??= await getOptionalSessionCookies();
       const result = await withSpinner(
         `正在获取我的${statusLabel}片单...`,
         () => getUserCollectionPageWithSession({

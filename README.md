@@ -63,7 +63,7 @@ douban book mark 2567698 --read --dry-run   # 先预览，确认后去掉 --dry-
 |---|---|
 | 电影与剧集 | `hot` `tv` `rank` `top250` `now` `coming` `weekly` `search` `movie` `rating` `comments` `reviews` |
 | 图书 | `book top250` `chart` `new` `search` `info` `rating` `comments` `reviews` `notes` |
-| 用户与豆列 | `user` `book user` `me` `list` `config` |
+| 用户与豆列 | `me` `book me` `user` `book user` `list` `config` |
 | 账号与备份 | `login` `whoami` `logout` `stats` `export` `book export` |
 | 修改记录 | `mark` `rate` `comment` `unmark` `record`，图书加 `book` 前缀；`review` `follow` `unfollow` |
 | 诊断 | `doctor` |

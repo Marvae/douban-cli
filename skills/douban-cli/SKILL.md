@@ -23,7 +23,7 @@ description: Query Douban (豆瓣) movies, TV shows, books, doulists and user co
 | Books | `book top250` / `chart` / `new` / `search`, then `book info` / `rating` / `comments` / `reviews` / `notes <id, ISBN or title>` |
 | Doulists | `list` (hot doulists), `list <id or url>` (contents) |
 | Someone's collections | `user <uid> [--wish/--doing]`, `book user <uid> [--wish/--reading]` |
-| The signed-in account | `whoami`, `me`, `stats`, `record <id>`, `book record <id>` |
+| The signed-in account | `whoami`, `me` / `book me [--wish/--doing/--reading]`, `stats`, `record <id>`, `book record <id>` |
 | Account changes | `mark` / `rate` / `comment` / `unmark` and the same under `book`, `review`, `follow`, `unfollow` |
 | Files | `export -o <path>`, `book export <uid> -o <path>` |
 
