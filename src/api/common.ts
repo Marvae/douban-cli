@@ -73,7 +73,8 @@ function stripTags(text: string): string {
 }
 
 export function cleanText(text: string): string {
-  return decodeHtml(stripTags(text)).replace(/\s+/g, ' ').trim();
+  // Douban titles sometimes carry invisible direction marks that break table alignment.
+  return decodeHtml(stripTags(text)).replace(/[\u200b-\u200f\u202a-\u202e\u2060\ufeff]/g, '').replace(/\s+/g, ' ').trim();
 }
 
 export function normalizeTitle(title: string): string {
