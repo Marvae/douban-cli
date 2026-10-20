@@ -474,7 +474,7 @@ export async function getBookInfo(id: string): Promise<BookDetail> {
     id: bookId,
     title,
     original_title: cleanText(mobile?.original_title || '') || html?.original_title || '-',
-    rating: typeof mobile?.rating?.value === 'number'
+    rating: typeof mobile?.rating?.value === 'number' && mobile.rating.value > 0
       ? mobile.rating.value.toFixed(1)
       : html?.rating || '-',
     rating_count: normalizeCount(mobile?.rating?.count) || html?.rating_count || 0,

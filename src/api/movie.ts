@@ -253,7 +253,8 @@ function applyMobileDetail(detail: MovieDetail, response: MobileMovieResponse): 
   if (response.title) detail.title = normalizeTitle(response.title);
   if (response.year) detail.year = cleanText(String(response.year));
   if (response.original_title) detail.original_title = normalizeTitle(response.original_title);
-  if (typeof response.rating?.value === 'number' && Number.isFinite(response.rating.value)) {
+  // Douban reports unrated titles as 0.
+  if (typeof response.rating?.value === 'number' && Number.isFinite(response.rating.value) && response.rating.value > 0) {
     detail.rating = response.rating.value.toFixed(1);
   }
   if (detail.directors.length === 0 && Array.isArray(response.directors)) {
@@ -348,7 +349,7 @@ function parseMovieDetailFromHtml(id: string, html: string): MovieDetail | null 
     title,
     year: yearText,
     original_title: originalTitle || '',
-    rating: ratingMatch ? cleanText(ratingMatch[1]) : '-',
+    rating: (ratingMatch ? cleanText(ratingMatch[1]) : '') || '-',
     directors,
     actors,
     genres: sanitizeList(genres),

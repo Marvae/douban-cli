@@ -112,7 +112,8 @@ export function parseMovieSearchPage(html: string, url = 'https://search.douban.
     .filter((item) => item.tpl_name === 'search_subject' && typeof item.url === 'string')
     .map((item) => {
       const rating = isRecord(item.rating) ? item.rating.value : undefined;
-      const ratingValue = typeof rating === 'number' && Number.isFinite(rating)
+      // Douban reports unrated titles as 0.
+      const ratingValue = typeof rating === 'number' && Number.isFinite(rating) && rating > 0
         ? rating.toFixed(1)
         : '-';
       const abstract = typeof item.abstract === 'string' ? item.abstract : '';
