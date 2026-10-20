@@ -1,13 +1,13 @@
-# douban-cli
+# douban-cli · 豆瓣命令行工具
 
 [![npm version](https://img.shields.io/npm/v/%40marvae24%2Fdouban-cli.svg)](https://www.npmjs.com/package/@marvae24/douban-cli)
 [![npm downloads](https://img.shields.io/npm/dm/%40marvae24%2Fdouban-cli.svg)](https://www.npmjs.com/package/@marvae24/douban-cli)
 [![CI](https://github.com/Marvae/douban-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Marvae/douban-cli/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-在终端和 AI 里用豆瓣：查电影、剧集、图书和豆列，备份自己的观影和读书记录，让 AI 帮你标记、评分、写短评。
+在终端和 AI 里用豆瓣：查电影、剧集、图书和 Top250，一条命令导出备份你的豆瓣观影和读书记录，让 AI 放心地帮你标记、评分、写短评。
 
-Use Douban from your terminal or AI agent: movies, TV shows, books, doulists, and your own records.
+Douban (豆瓣) from your terminal and AI agents: look up movies, TV shows and books, back up your ratings and reviews to JSON, CSV or Markdown, and let an agent mark and rate titles safely.
 
 ```text
 $ npx @marvae24/douban-cli now
@@ -22,10 +22,20 @@ $ npx @marvae24/douban-cli now
 5    野兽之心             7.3    09.30   36828393
 ```
 
-- 🪶 **不用安装**：有 Node.js 就能用 `npx` 直接运行。只有 2 个依赖，不启动浏览器，也不需要申请 API key。
+- 💾 **备份你的豆瓣**：一条命令导出看过、想看、在看和读过、想读、在读，连同评分、短评和“仅自己可见”的条目，存成 JSON、CSV 或 Markdown。
 - 🤖 **交给 AI**：装上 Skill，直接说“今晚看什么”“把《三体》标成读过，评 5 星”。改动账号前会先给你看预览。
-- 💾 **备份你的豆瓣**：一条命令把看过、想看、在看和书单导出成 JSON、CSV 或 Markdown。
-- 🔎 **想查就查**：片名、书名、ISBN 直接查评分、短评、书评和相似推荐；Top250、正在热映、豆列都能看。
+- 🔎 **想查就查**：片名、书名、ISBN 直接查评分、短评、书评和相似推荐；Top250、正在热映、口碑榜、豆列都能看，不用登录。
+- 🛡️ **改得放心**：只改你指定的内容，原有评分、标签和可见性都会保留，不发广播，改完读回核对。
+- 🪶 **不用安装**：有 Node.js 就能用 `npx` 直接运行。只有 2 个依赖，不需要申请 API key。
+
+## 常见用法
+
+| 想做的事 | 怎么做 |
+|---|---|
+| 备份豆瓣观影、读书记录 | `douban export -o movies.md`，`douban book export -o books.csv` |
+| 把微信读书读完的书同步到豆瓣 | 同时装上微信读书官方 Skill，对 AI 说“把我今年在微信读书读完的书标到豆瓣”；按 ISBN 精确匹配，先预览再提交 |
+| 找下一部想看的 | 对 AI 说“推荐几部像《沙丘》的电影”，或 `douban movie 沙丘` 看相似推荐 |
+| 查评分和榜单 | `douban top250`、`douban now`、`douban weekly`、`douban book info <ISBN>` |
 
 ## 在 AI agent 里使用
 
@@ -87,3 +97,5 @@ npm run verify   # lint、类型检查、单元测试、构建和 CLI 冒烟测�
 ## License
 
 MIT
+
+觉得有用的话，点个 ⭐ Star，让更多人找到它。
