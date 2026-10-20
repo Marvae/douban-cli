@@ -9,7 +9,14 @@ import { registerUserCommands } from './commands/user.js';
 import { registerMarkCommands } from './commands/mark.js';
 import { registerAuthCommands } from './commands/auth.js';
 import { registerSocialCommands } from './commands/social.js';
+import { registerDoctorCommand } from './commands/doctor.js';
 import { handleProgramError } from './utils/error.js';
+
+const [nodeMajor = 0, nodeMinor = 0] = process.versions.node.split('.').map(Number);
+if (nodeMajor < 22 || (nodeMajor === 22 && nodeMinor < 13)) {
+  console.error(`douban-cli 需要 Node.js 22.13 或更高版本，当前为 ${process.versions.node}。请升级 Node.js 后重试：https://nodejs.org/`);
+  process.exit(1);
+}
 
 const require = createRequire(import.meta.url);
 const pkg = require('../package.json') as { version?: string };
@@ -28,8 +35,7 @@ program
     outputError: () => undefined
   });
 
-// Registration order sets the help group order: movies, books, users and
-// doulists, account, writes.
+// Registration order sets the order of the help groups.
 registerMovieCommands(program);
 const bookCommand = registerBookCommands(program);
 registerUserCommands(program);
@@ -37,6 +43,7 @@ registerListCommands(program);
 registerAuthCommands(program);
 registerMarkCommands(program, bookCommand);
 registerSocialCommands(program);
+registerDoctorCommand(program);
 
 const defaultHelp = new Help();
 program.configureHelp({
