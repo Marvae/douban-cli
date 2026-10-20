@@ -10,6 +10,7 @@ import { registerMarkCommands } from './commands/mark.js';
 import { registerAuthCommands } from './commands/auth.js';
 import { registerSocialCommands } from './commands/social.js';
 import { registerDoctorCommand } from './commands/doctor.js';
+import { printWelcome } from './commands/welcome.js';
 import { handleProgramError } from './utils/error.js';
 
 const [nodeMajor = 0, nodeMinor = 0] = process.versions.node.split('.').map(Number);
@@ -81,6 +82,10 @@ program.addHelpText('after', () => `
   文档: https://github.com/Marvae/douban-cli#readme
 `);
 
-program.parseAsync().catch((error) => {
-  handleProgramError(error);
-});
+if (process.argv.length <= 2) {
+  await printWelcome(program.version() ?? '');
+} else {
+  program.parseAsync().catch((error) => {
+    handleProgramError(error);
+  });
+}

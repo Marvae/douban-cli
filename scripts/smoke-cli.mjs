@@ -15,6 +15,11 @@ function run(...args) {
   return result;
 }
 
+const welcome = run();
+assert.equal(welcome.status, 0);
+assert.match(welcome.stdout, /常用命令/);
+assert.match(welcome.stdout, /douban --help/);
+
 const rootHelp = run('--help');
 assert.equal(rootHelp.status, 0);
 assert.match(rootHelp.stdout, /douban - 豆瓣命令行工具 v\d+/);
