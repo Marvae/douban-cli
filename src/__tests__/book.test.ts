@@ -26,7 +26,7 @@ describe('book parsers', () => {
       id: '1234567',
       title: '测试图书',
       rating: '9.1',
-      votes: '123人评价',
+      rating_count: 123,
       rank: 1,
       trend: 'up 2',
       tags: ['小说']

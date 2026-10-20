@@ -8,7 +8,7 @@ export interface CollectionSubject {
   title: string;
   rank: number;
   rating: string;
-  votes: string;
+  rating_count: number;
   meta: string;
   cover: string;
   description: string;
@@ -46,7 +46,7 @@ async function getSubjectCollection(
       title,
       rank: Number.isInteger(item.rank) && Number(item.rank) > 0 ? Number(item.rank) : start + index + 1,
       rating: typeof rating.value === 'number' && Number.isFinite(rating.value) && rating.value > 0 ? rating.value.toFixed(1) : '-',
-      votes: typeof rating.count === 'number' ? `${rating.count}人评价` : '-',
+      rating_count: typeof rating.count === 'number' && rating.count > 0 ? Math.trunc(rating.count) : 0,
       meta: typeof item.card_subtitle === 'string' ? cleanText(item.card_subtitle) : '-',
       cover,
       description: typeof item.description === 'string' ? cleanText(item.description) : '',
@@ -153,7 +153,8 @@ export function parseSubjectRecommendations(html: string, kind: SubjectKind): Su
 export interface SubjectReviewItem {
   id: string;
   user: string;
-  rating: string;
+  /** Reviewer stars, 0 when not rated. */
+  rating: number;
   votes: number;
   time: string;
   content: string;
@@ -242,8 +243,8 @@ export async function getSubjectReviews(
     id: item.id || '',
     user: cleanText(item.user?.name || '') || '匿名',
     rating: typeof item.rating?.value === 'number' && Number.isFinite(item.rating.value)
-      ? String(item.rating.value)
-      : '-',
+      ? Math.trunc(item.rating.value)
+      : 0,
     votes: typeof item.useful_count === 'number' && Number.isFinite(item.useful_count)
       ? Math.max(0, Math.trunc(item.useful_count))
       : 0,

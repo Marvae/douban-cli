@@ -278,7 +278,7 @@ export function registerExportCommands(program: Command, book: Command): void {
   program
     .command('stats')
     .helpGroup('账号:')
-    .description('我的统计（今年看了多少片） [需登录]')
+    .description('我某一年的观影统计 [需登录]')
     .option('-y, --year <year>', '统计年份，默认今年')
     .option('-n, --limit <n>', '最多读取的看过记录数', '1000')
     .option('--delay <seconds>', '分页请求间隔（秒）', '1')
@@ -333,11 +333,11 @@ export function registerExportCommands(program: Command, book: Command): void {
   program
     .command('export')
     .helpGroup('账号:')
-    .description('导出我的观影记录 [需登录]')
-    .requiredOption('-o, --output <path>', '输出文件路径（包含个人数据，必须明确指定）')
-    .option('-f, --format <format>', '导出格式：json/csv', 'json')
-    .option('-n, --limit <n>', '导出数量上限', '1000')
-    .option('--delay <seconds>', '批量请求间隔（秒）', '1')
+    .description('导出我的看过/想看/在看 [需登录]')
+    .requiredOption('-o, --output <path>', '输出文件路径')
+    .option('-f, --format <format>', '格式：json 或 csv', 'json')
+    .option('-n, --limit <n>', '每种状态最多导出数量', '1000')
+    .option('--delay <seconds>', '分页请求间隔（秒）', '1')
     .action(withErrorHandler({
       command: 'export',
       suggestion: '可尝试：douban export --format csv -o records.csv'
@@ -408,7 +408,7 @@ export function registerExportCommands(program: Command, book: Command): void {
 
   book
     .command('export <userId>')
-    .description('导出指定用户的图书收藏')
+    .description('导出指定用户的书单')
     .option('--wish', '导出“想读”列表（默认读过）')
     .option('--reading', '导出“在读”列表')
     .option('-n, --limit <n>', `最多导出数量（上限 ${MAX_EXPORT_ITEMS}）`, String(DEFAULT_EXPORT_LIMIT))

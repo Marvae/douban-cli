@@ -5,11 +5,10 @@ export interface ParsedBookListItem {
   id: string;
   title: string;
   rating: string;
-  votes: string;
+  rating_count: number;
   meta: string;
   url: string;
   cover?: string;
-  abstract?: string;
   rank?: number;
   trend?: string;
   tags?: string[];
@@ -53,10 +52,11 @@ function splitField(value: string): string[] {
     .filter(Boolean);
 }
 
-function parseVotes(block: string): string {
+/** Number of raters from "(1994人评价)"; 0 when the page shows none. */
+function parseRatingCount(block: string): number {
   const match = block.match(/<span[^>]*class=["'][^"']*\bpl\b[^"']*["'][^>]*>\s*\(([\s\S]*?)\)\s*<\/span>/i)
     || block.match(/<span[^>]*class=["'][^"']*color-gray[^"']*["'][^>]*>\s*\(([\s\S]*?)\)\s*<\/span>/i);
-  return match ? cleanText(match[1]) : '-';
+  return Number(cleanText(match?.[1] ?? '').match(/\d+/)?.[0] ?? 0);
 }
 
 export function parseBookMediaList(html: string): ParsedBookListItem[] {
@@ -94,7 +94,7 @@ export function parseBookMediaList(html: string): ParsedBookListItem[] {
       id: linkMatch[2],
       title,
       rating: ratingMatch && cleanText(ratingMatch[1]) ? cleanText(ratingMatch[1]) : '-',
-      votes: parseVotes(block),
+      rating_count: parseRatingCount(block),
       meta: metaMatch ? cleanText(metaMatch[1]) : '-',
       url: linkMatch[1],
       cover: coverMatch?.[1],

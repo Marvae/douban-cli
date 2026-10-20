@@ -95,7 +95,7 @@ export function registerMovieCommands(program: Command): void {
   program
     .command('hot')
     .helpGroup('电影:')
-    .description('获取热门电影或剧集')
+    .description('热门电影，加 --tv 看剧集')
     .option('--tv', '显示剧集而非电影')
     .option('-t, --tag <tag>', '按标签筛选（热门/美剧/英剧/日剧/韩剧/国产剧/综艺/最新）', '热门')
     .option('-n, --limit <n>', '返回数量', '20')
@@ -120,7 +120,7 @@ export function registerMovieCommands(program: Command): void {
         renderTable(items, [
           { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
           { header: '片名', value: (item) => item.title, minWidth: 18 },
-          { header: '评分', value: (item) => (item.rate && item.rate !== '0' ? item.rate : '-') },
+          { header: '评分', value: (item) => item.rating },
           { header: 'ID', value: (item) => item.id }
         ]);
       }
@@ -129,7 +129,7 @@ export function registerMovieCommands(program: Command): void {
   program
     .command('tv <tag>')
     .helpGroup('电影:')
-    .description('按标签获取剧集列表（美剧/英剧/日剧/韩剧/国产剧/综艺）')
+    .description('按标签看剧集（美剧/日剧/韩剧/国产剧/综艺…）')
     .option('-n, --limit <n>', '返回数量', '20')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
@@ -155,7 +155,7 @@ export function registerMovieCommands(program: Command): void {
         renderTable(items, [
           { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
           { header: '片名', value: (item) => item.title, minWidth: 18 },
-          { header: '评分', value: (item) => (item.rate && item.rate !== '0' ? item.rate : '-') },
+          { header: '评分', value: (item) => item.rating },
           { header: 'ID', value: (item) => item.id }
         ]);
       }
@@ -164,7 +164,7 @@ export function registerMovieCommands(program: Command): void {
   program
     .command('rank <genre>')
     .helpGroup('电影:')
-    .description('按类型查看高分电影排行（科幻/动作/爱情/动画/悬疑...）')
+    .description('各类型高分电影（科幻/动作/爱情/动画/悬疑…）')
     .option('-n, --limit <n>', '返回数量', '20')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
@@ -194,8 +194,8 @@ export function registerMovieCommands(program: Command): void {
           { header: '片名', value: (item) => item.title, minWidth: 18 },
           { header: '年份', value: (item) => normalizeYear(item.release_date) },
           { header: '类型', value: (item) => formatTags(item.types), minWidth: 14 },
-          { header: '评分', value: (item) => item.score || '-' },
-          { header: '评价', value: (item) => compactNumber(item.vote_count) },
+          { header: '评分', value: (item) => item.rating },
+          { header: '评价', value: (item) => compactNumber(item.rating_count) },
           { header: 'ID', value: (item) => item.id }
         ]);
       }
@@ -204,7 +204,7 @@ export function registerMovieCommands(program: Command): void {
   program
     .command('top250')
     .helpGroup('电影:')
-    .description('获取豆瓣 Top 250 电影')
+    .description('豆瓣电影 Top250')
     .option('-p, --page <n>', '页码（从 1 开始）', '1')
     .option('-n, --limit <n>', '每页数量', '25')
     .option('--json', '以 JSON 输出')
@@ -260,9 +260,99 @@ export function registerMovieCommands(program: Command): void {
     }));
 
   program
+    .command('now')
+    .helpGroup('电影:')
+    .description('正在热映（全国）')
+    .option('-n, --limit <n>', '返回数量', '20')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'now',
+      suggestion: '可尝试：douban now -n 10'
+    }, async (opts) => {
+      const limit = parsePositiveInt(opts.limit, '--limit', 20);
+      const items = await withSpinner('正在获取正在热映电影...', () => getNowShowing(limit), !opts.json);
+
+      if (opts.json) {
+        console.log(JSON.stringify(items, null, 2));
+      } else {
+        console.log('\n🍿 正在热映\n');
+        renderTable(items, [
+          { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
+          { header: '片名', value: (item) => item.title, minWidth: 18 },
+          { header: '评分', value: (item) => item.rating },
+          { header: '上映', value: (item) => item.release_date },
+          { header: 'ID', value: (item) => item.id }
+        ]);
+      }
+    }));
+
+  program
+    .command('coming')
+    .helpGroup('电影:')
+    .description('即将上映')
+    .option('-n, --limit <n>', '返回数量', '20')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'coming',
+      suggestion: '可尝试：douban coming -n 30'
+    }, async (opts) => {
+      const limit = parsePositiveInt(opts.limit, '--limit', 20);
+      const items = await withSpinner(
+        '正在获取即将上映电影...',
+        () => getComing(limit),
+        !opts.json
+      );
+
+      if (opts.json) {
+        console.log(JSON.stringify(items, null, 2));
+      } else {
+        console.log('\n📅 即将上映\n');
+        renderTable(items, [
+          { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
+          { header: '片名', value: (item) => item.title, minWidth: 18 },
+          { header: '日期', value: (item) => normalizeDate(item.release_date) },
+          { header: '类型', value: (item) => formatTags(item.types), minWidth: 16 },
+          { header: '地区', value: (item) => formatRegion(item.regions), minWidth: 10 },
+          { header: '想看', value: (item) => compactNumber(item.wish_count) },
+          { header: 'ID', value: (item) => item.id }
+        ]);
+      }
+    }));
+
+  program
+    .command('weekly')
+    .helpGroup('电影:')
+    .description('一周口碑榜')
+    .option('-n, --limit <n>', '返回数量', '10')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'weekly',
+      suggestion: '可尝试：douban weekly'
+    }, async (opts) => {
+      const limit = parsePositiveInt(opts.limit, '--limit', 10);
+      const items = await withSpinner(
+        '正在获取一周口碑榜...',
+        () => getWeekly(limit),
+        !opts.json
+      );
+
+      if (opts.json) {
+        console.log(JSON.stringify(items, null, 2));
+      } else {
+        console.log('\n📈 一周口碑榜\n');
+        renderTable(items, [
+          { header: '#', value: (item) => String(item.rank), minWidth: 2 },
+          { header: '片名', value: (item) => item.title, minWidth: 18 },
+          { header: '变化', value: (item) => formatTrend(item.trend) || '—' },
+          { header: 'ID', value: (item) => item.id }
+        ]);
+      }
+    }));
+
+  program
     .command('search <keyword>')
     .helpGroup('电影:')
-    .description('按关键词搜索电影')
+    .description('搜索电影和剧集')
     .option('-s, --start <n>', '起始偏移', '0')
     .option('-n, --limit <n>', '返回数量', '20')
     .option('--json', '以 JSON 输出')
@@ -305,7 +395,7 @@ export function registerMovieCommands(program: Command): void {
   program
     .command('movie <id-or-title>')
     .helpGroup('电影:')
-    .description('按电影 ID 或片名获取详情')
+    .description('电影详情和相似推荐（ID 或片名）')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
       command: 'movie',
@@ -355,7 +445,7 @@ export function registerMovieCommands(program: Command): void {
   program
     .command('rating <id-or-title>')
     .helpGroup('电影:')
-    .description('按电影 ID 或片名获取评分分布')
+    .description('评分分布（ID 或片名）')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
       command: 'rating',
@@ -390,153 +480,9 @@ export function registerMovieCommands(program: Command): void {
     }));
 
   program
-    .command('now')
-    .helpGroup('电影:')
-    .description('获取正在热映电影（全国）')
-    .option('-n, --limit <n>', '返回数量', '20')
-    .option('--json', '以 JSON 输出')
-    .action(withErrorHandler({
-      command: 'now',
-      suggestion: '可尝试：douban now -n 10'
-    }, async (opts) => {
-      const limit = parsePositiveInt(opts.limit, '--limit', 20);
-      const items = await withSpinner('正在获取正在热映电影...', () => getNowShowing(limit), !opts.json);
-
-      if (opts.json) {
-        console.log(JSON.stringify(items, null, 2));
-      } else {
-        console.log('\n🍿 正在热映\n');
-        renderTable(items, [
-          { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
-          { header: '片名', value: (item) => item.title, minWidth: 18 },
-          { header: '评分', value: (item) => item.rating },
-          { header: '上映', value: (item) => item.release_date },
-          { header: 'ID', value: (item) => item.id }
-        ]);
-      }
-    }));
-
-  program
-    .command('coming')
-    .helpGroup('电影:')
-    .description('获取即将上映电影')
-    .option('-n, --limit <n>', '返回数量', '20')
-    .option('--json', '以 JSON 输出')
-    .action(withErrorHandler({
-      command: 'coming',
-      suggestion: '可尝试：douban coming -n 30'
-    }, async (opts) => {
-      const limit = parsePositiveInt(opts.limit, '--limit', 20);
-      const items = await withSpinner(
-        '正在获取即将上映电影...',
-        () => getComing(limit),
-        !opts.json
-      );
-
-      if (opts.json) {
-        console.log(JSON.stringify(items, null, 2));
-      } else {
-        console.log('\n📅 即将上映\n');
-        renderTable(items, [
-          { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
-          { header: '片名', value: (item) => item.title, minWidth: 18 },
-          { header: '日期', value: (item) => normalizeDate(item.release_date) },
-          { header: '类型', value: (item) => formatTags(item.types), minWidth: 16 },
-          { header: '地区', value: (item) => formatRegion(item.regions), minWidth: 10 },
-          { header: '想看', value: (item) => compactNumber(item.wish_count) },
-          { header: 'ID', value: (item) => item.id }
-        ]);
-      }
-    }));
-
-  program
-    .command('weekly')
-    .helpGroup('电影:')
-    .description('获取一周口碑榜')
-    .option('-n, --limit <n>', '返回数量', '10')
-    .option('--json', '以 JSON 输出')
-    .action(withErrorHandler({
-      command: 'weekly',
-      suggestion: '可尝试：douban weekly'
-    }, async (opts) => {
-      const limit = parsePositiveInt(opts.limit, '--limit', 10);
-      const items = await withSpinner(
-        '正在获取一周口碑榜...',
-        () => getWeekly(limit),
-        !opts.json
-      );
-
-      if (opts.json) {
-        console.log(JSON.stringify(items, null, 2));
-      } else {
-        console.log('\n📈 一周口碑榜\n');
-        renderTable(items, [
-          { header: '#', value: (item) => String(item.rank), minWidth: 2 },
-          { header: '片名', value: (item) => item.title, minWidth: 18 },
-          { header: '变化', value: (item) => formatTrend(item.trend) || '—' },
-          { header: 'ID', value: (item) => item.id }
-        ]);
-      }
-    }));
-
-  program
-    .command('reviews <id-or-title>')
-    .helpGroup('电影:')
-    .description('按电影 ID 或片名获取热门影评')
-    .option('-p, --page <n>', '页码（从 1 开始）', '1')
-    .option('-n, --limit <n>', '返回数量', '20')
-    .option('--json', '以 JSON 输出')
-    .action(withErrorHandler((args) => ({
-      command: 'reviews',
-      target: `ID: ${String(args[0] || '未指定')}`,
-      suggestion: '可尝试：douban reviews 1292052 --page 2'
-    }), async (movieId, opts) => {
-      const { id, title } = await resolveMovie(movieId, Boolean(opts.json));
-      const limit = parsePositiveInt(opts.limit, '--limit', 20);
-      const page = parsePositiveInt(opts.page, '--page', 1);
-
-      if (opts.json) {
-        // JSON mode returns one page without an interactive prompt.
-        const start = pageToOffset(page, limit);
-        const { items, total } = await withSpinner(
-          '正在获取热门影评...',
-          () => getReviews(id, start, limit),
-          false
-        );
-        console.log(JSON.stringify({ items, total }, null, 2));
-        return;
-      }
-
-      await withPagination({
-        startPage: page,
-        pageSize: limit,
-        fetchPage: async (currentPage) => {
-          const start = pageToOffset(currentPage, limit);
-          const { items, total } = await withSpinner(
-            '正在获取热门影评...',
-            () => getReviews(id, start, limit),
-            true
-          );
-          return {
-            items,
-            total,
-            hasMore: start + items.length < total
-          };
-        },
-        renderPage: (items, currentPage, total) => {
-          const start = pageToOffset(currentPage, limit);
-          const { from, to } = getPageRange(currentPage, limit, items.length);
-
-          printListHeading(`📝 热门影评 · ${subjectLabel(id, title)}`, total, from, to);
-          printPosts(items, start);
-        }
-      });
-    }));
-
-  program
     .command('comments <id-or-title>')
     .helpGroup('电影:')
-    .description('按电影 ID 或片名获取热门短评')
+    .description('热门短评（ID 或片名）')
     .option('-p, --page <n>', '页码（从 1 开始）', '1')
     .option('-n, --limit <n>', '返回数量', '20')
     .option('--json', '以 JSON 输出')
@@ -582,6 +528,60 @@ export function registerMovieCommands(program: Command): void {
           const { from, to } = getPageRange(currentPage, limit, items.length);
 
           printListHeading(`💬 热门短评 · ${subjectLabel(id, title)}`, total, from, to);
+          printPosts(items, start);
+        }
+      });
+    }));
+
+  program
+    .command('reviews <id-or-title>')
+    .helpGroup('电影:')
+    .description('热门影评（ID 或片名）')
+    .option('-p, --page <n>', '页码（从 1 开始）', '1')
+    .option('-n, --limit <n>', '返回数量', '20')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler((args) => ({
+      command: 'reviews',
+      target: `ID: ${String(args[0] || '未指定')}`,
+      suggestion: '可尝试：douban reviews 1292052 --page 2'
+    }), async (movieId, opts) => {
+      const { id, title } = await resolveMovie(movieId, Boolean(opts.json));
+      const limit = parsePositiveInt(opts.limit, '--limit', 20);
+      const page = parsePositiveInt(opts.page, '--page', 1);
+
+      if (opts.json) {
+        // JSON mode returns one page without an interactive prompt.
+        const start = pageToOffset(page, limit);
+        const { items, total } = await withSpinner(
+          '正在获取热门影评...',
+          () => getReviews(id, start, limit),
+          false
+        );
+        console.log(JSON.stringify({ items, total }, null, 2));
+        return;
+      }
+
+      await withPagination({
+        startPage: page,
+        pageSize: limit,
+        fetchPage: async (currentPage) => {
+          const start = pageToOffset(currentPage, limit);
+          const { items, total } = await withSpinner(
+            '正在获取热门影评...',
+            () => getReviews(id, start, limit),
+            true
+          );
+          return {
+            items,
+            total,
+            hasMore: start + items.length < total
+          };
+        },
+        renderPage: (items, currentPage, total) => {
+          const start = pageToOffset(currentPage, limit);
+          const { from, to } = getPageRange(currentPage, limit, items.length);
+
+          printListHeading(`📝 热门影评 · ${subjectLabel(id, title)}`, total, from, to);
           printPosts(items, start);
         }
       });

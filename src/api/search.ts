@@ -18,7 +18,8 @@ export interface SearchItem {
   type?: 'movie' | 'tv';
   url: string;
   cover?: string;
-  abstract?: string;
+  /** card_subtitle, e.g. 中国大陆 / 剧情 / 陈凯歌 / 张国荣. */
+  meta?: string;
 }
 
 export interface SubjectSearchResult {
@@ -28,7 +29,7 @@ export interface SubjectSearchResult {
   type: string;
   year?: string;
   rating: string;
-  votes: number;
+  rating_count: number;
   /** card_subtitle, e.g. 中国大陆 / 剧情 / 陈凯歌 or 作者 / 2020 / 出版社. */
   subtitle: string;
   cover?: string;
@@ -53,7 +54,7 @@ function parseSearchItem(kind: SubjectKind, item: unknown): SubjectSearchResult 
     year: typeof target.year === 'string' && target.year ? target.year : undefined,
     // Douban reports unrated titles as 0.
     rating: typeof rating.value === 'number' && rating.value > 0 ? rating.value.toFixed(1) : '-',
-    votes: typeof rating.count === 'number' ? rating.count : 0,
+    rating_count: typeof rating.count === 'number' ? rating.count : 0,
     subtitle: typeof target.card_subtitle === 'string' ? cleanText(target.card_subtitle) : '',
     cover: typeof target.cover_url === 'string' ? target.cover_url : undefined,
     url: `https://${kind}.douban.com/subject/${id}/`
@@ -126,6 +127,6 @@ export async function searchMovies(
     type: item.type === 'tv' ? 'tv' : 'movie',
     url: item.url,
     cover: item.cover,
-    abstract: item.subtitle || undefined
+    meta: item.subtitle || undefined
   }));
 }

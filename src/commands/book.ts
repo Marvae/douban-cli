@@ -51,7 +51,7 @@ function renderBookList(items: BookItem[], heading: string, offset = 0): void {
     { header: '#', value: (item, index) => String(item.rank || offset + index + 1), minWidth: 2 },
     { header: '书名', value: (item) => item.title, maxWidth: 24 },
     { header: '评分', value: (item) => item.rating },
-    { header: '评价', value: (item) => compactNumber(Number(item.votes?.match(/\d+/)?.[0] ?? Number.NaN)) },
+    { header: '评价', value: (item) => (item.rating_count > 0 ? compactNumber(item.rating_count) : '-') },
     ...trendColumn,
     { header: '作者 / 出版', value: (item) => item.meta, maxWidth: 30 },
     { header: 'ID', value: (item) => item.id }
@@ -90,7 +90,7 @@ function registerTop250Command(book: Command, name: 'hot' | 'top250'): void {
   const legacy = name === 'hot';
   book
     .command(name, { hidden: legacy })
-    .description(legacy ? '获取热门书籍（兼容旧版，等同 Top250）' : '获取豆瓣图书 Top250')
+    .description(legacy ? '获取热门书籍（兼容旧版，等同 Top250）' : '豆瓣图书 Top250')
     .option('-p, --page <n>', '页码（从 1 开始）', '1')
     .option('-n, --limit <n>', '每页数量', '25')
     .option('--json', '以 JSON 输出')
@@ -138,7 +138,7 @@ export function registerBookCommands(program: Command): Command {
   registerTop250Command(book, 'top250');
   book
     .command('chart [category]')
-    .description('获取当前热门图书榜')
+    .description('热门图书榜')
     .option('-n, --limit <n>', '返回数量（最多 20）', '20')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
@@ -161,7 +161,7 @@ export function registerBookCommands(program: Command): Command {
   book
     .command('new [category]')
     .alias('latest')
-    .description('获取新书速递')
+    .description('新书速递')
     .option('-n, --limit <n>', '返回数量（最多 20）', '20')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
@@ -183,7 +183,7 @@ export function registerBookCommands(program: Command): Command {
 
   book
     .command('search <keyword>')
-    .description('按书名、作者或 ISBN 搜索')
+    .description('搜索图书（书名、作者或 ISBN）')
     .option('-s, --start <n>', '起始偏移', '0')
     .option('-n, --limit <n>', '返回数量', '20')
     .option('--json', '以 JSON 输出')
@@ -209,7 +209,7 @@ export function registerBookCommands(program: Command): Command {
 
   book
     .command('info <query>')
-    .description('按豆瓣 ID、ISBN 或关键词获取书籍详情')
+    .description('图书详情和相似推荐（ID、ISBN 或书名）')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
       command: 'book info',
@@ -257,7 +257,7 @@ export function registerBookCommands(program: Command): Command {
 
   book
     .command('rating <query>')
-    .description('获取书籍评分分布')
+    .description('评分分布（ID、ISBN 或书名）')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
       command: 'book rating',
@@ -285,7 +285,7 @@ export function registerBookCommands(program: Command): Command {
 
   book
     .command('comments <query>')
-    .description('获取书籍热门短评')
+    .description('热门短评（ID、ISBN 或书名）')
     .option('-p, --page <n>', '页码（从 1 开始）', '1')
     .option('-n, --limit <n>', '每页数量', '20')
     .option('--json', '以 JSON 输出')
@@ -327,7 +327,7 @@ export function registerBookCommands(program: Command): Command {
 
   book
     .command('reviews <query>')
-    .description('获取热门书评')
+    .description('热门书评（ID、ISBN 或书名）')
     .option('-p, --page <n>', '页码（从 1 开始）', '1')
     .option('-n, --limit <n>', '每页数量', '20')
     .option('--json', '以 JSON 输出')
@@ -365,7 +365,7 @@ export function registerBookCommands(program: Command): Command {
 
   book
     .command('notes <query>')
-    .description('获取热门读书笔记')
+    .description('读书笔记（ID、ISBN 或书名）')
     .option('-p, --page <n>', '页码（从 1 开始）', '1')
     .option('-n, --limit <n>', '每页数量', '20')
     .option('--json', '以 JSON 输出')

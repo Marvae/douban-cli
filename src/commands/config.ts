@@ -7,8 +7,8 @@ export function registerConfigCommand(program: Command): void {
   program
     .command('config')
     .helpGroup('用户与豆列:')
-    .description('设置本地 douban-cli 配置')
-    .option('--user <id>', '设置 me 命令默认用户 ID')
+    .description('设置 me 和 book me 默认查看的用户')
+    .option('--user <id>', '默认用户 ID（个人主页地址 /people/<id>/ 中的部分）')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler({
       command: 'config',

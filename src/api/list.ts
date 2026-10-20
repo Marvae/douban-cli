@@ -61,7 +61,8 @@ export interface DoulistEntry {
   kind: 'movie' | 'book' | 'music' | 'other';
   title: string;
   rating: string;
-  abstract: string;
+  /** Year, region, genre and people, or author and publisher. */
+  meta: string;
   url: string;
 }
 
@@ -108,7 +109,7 @@ function parseDoulistEntry(item: unknown, position: number): DoulistEntry | null
     kind,
     title,
     rating: typeof rating === 'number' && rating > 0 ? rating.toFixed(1) : '-',
-    abstract: typeof item.subtitle === 'string' ? cleanText(item.subtitle) : '',
+    meta: typeof item.subtitle === 'string' ? cleanText(item.subtitle) : '',
     url
   };
 }

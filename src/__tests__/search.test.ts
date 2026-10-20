@@ -38,7 +38,7 @@ describe('search', () => {
     ])));
 
     await expect(searchMovies('醉梦')).resolves.toEqual([
-      expect.objectContaining({ id: '1', type: 'tv', year: '2026', rating: '7.9', abstract: '中国 / 剧情' }),
+      expect.objectContaining({ id: '1', type: 'tv', year: '2026', rating: '7.9', meta: '中国 / 剧情' }),
       expect.objectContaining({ id: '3', type: 'movie', rating: '-' })
     ]);
   });
@@ -59,7 +59,7 @@ describe('search', () => {
   it('maps book results to book list items', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => searchResponse([{ id: '34800934', title: '在森崎书店的日子', type: 'book', rating: 7.6 }])));
     await expect(searchBooks('森崎书店')).resolves.toEqual([
-      expect.objectContaining({ id: '34800934', rating: '7.6', votes: '10人评价', meta: '中国 / 剧情' })
+      expect.objectContaining({ id: '34800934', rating: '7.6', rating_count: 10, meta: '中国 / 剧情' })
     ]);
   });
 

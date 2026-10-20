@@ -79,13 +79,12 @@ export function printListHeading(heading: string, total: number | undefined, fro
 
 /** Short comments and reviews: who, how they rated, likes and when, then the text. */
 export function printPosts(
-  items: Array<{ user: string; rating: number | string; votes: number; time: string; content: string }>,
+  items: Array<{ user: string; rating: number; votes: number; time: string; content: string }>,
   offset: number
 ): void {
   if (items.length === 0) console.log('暂无内容');
   items.forEach((item, index) => {
-    const rating = Number(item.rating);
-    const stars = rating > 0 ? `  ${formatStars(rating)}` : '';
+    const stars = item.rating > 0 ? `  ${formatStars(item.rating)}` : '';
     if (index > 0) console.log('');
     console.log(`${String(offset + index + 1).padStart(2)}. ${item.user}${stars}  👍${item.votes}  ${item.time}`);
     console.log(`    ${item.content}`);

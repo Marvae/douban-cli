@@ -26,7 +26,7 @@ describe('discovery', () => {
 
     expect(list).toMatchObject({ id: '240962', title: '高分榜', description: '说明 第二行', next_start: 3, partial: true });
     expect(list.items).toEqual([
-      expect.objectContaining({ position: 1, id: '1', kind: 'movie', rating: '9.7', abstract: '1994 / 美国' }),
+      expect.objectContaining({ position: 1, id: '1', kind: 'movie', rating: '9.7', meta: '1994 / 美国' }),
       expect.objectContaining({ position: 2, id: '2', kind: 'movie', rating: '-' }),
       expect.objectContaining({ position: 3, id: '', kind: 'other' })
     ]);

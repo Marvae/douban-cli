@@ -498,7 +498,7 @@ describe('authentication safety', () => {
     expect(optionNames).not.toContain('--cookie');
     expect(login?.options.find((option) => option.long === '--open')?.description)
       .toContain('不能与 --profile 同用');
-    expect(login?.description()).toBe('从浏览器读取，或显式导入豆瓣登录态');
+    expect(login?.description()).toBe('登录：读取浏览器里已登录的豆瓣，或导入 Cookie');
   });
 
   it('omits all Cookie material from manual login JSON output', async () => {

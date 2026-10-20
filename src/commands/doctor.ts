@@ -77,7 +77,7 @@ export function registerDoctorCommand(program: Command): void {
   program
     .command('doctor')
     .helpGroup('工具:')
-    .description('检查运行环境、登录态和文件权限；--online 再检查网络、搜索限流和登录有效性')
+    .description('检查运行环境、登录态和文件权限（--online 再检查网络）')
     .option('--online', '额外发送 2-3 个只读请求，检查公开接口、搜索限流和登录有效性')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler({ command: 'doctor' }, async (opts) => {

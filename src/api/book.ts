@@ -29,11 +29,10 @@ export interface BookItem {
   id: string;
   title: string;
   rating: string;
-  votes: string;
+  rating_count: number;
   meta: string;
   url: string;
   cover?: string;
-  abstract?: string;
   rank?: number;
   trend?: string;
   tags?: string[];
@@ -226,7 +225,7 @@ export async function searchBooks(
     id: item.id,
     title: item.title,
     rating: item.rating,
-    votes: item.votes > 0 ? `${item.votes}人评价` : '-',
+    rating_count: item.rating_count,
     meta: item.subtitle || '-',
     year: item.year,
     url: item.url,

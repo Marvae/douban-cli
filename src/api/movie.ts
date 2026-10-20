@@ -16,7 +16,7 @@ import { debug } from '../utils/debug.js';
 interface Subject {
   id: string;
   title: string;
-  rate: string;
+  rating: string;
   url: string;
   cover: string;
 }
@@ -24,14 +24,14 @@ interface Subject {
 interface RankItem {
   id: string;
   title: string;
-  score: string;
-  vote_count: number;
+  rating: string;
+  rating_count: number;
   types: string[];
   regions: string[];
   release_date: string;
   actors: string[];
   url: string;
-  cover_url: string;
+  cover: string;
 }
 
 export interface MovieDetail {
@@ -131,6 +131,12 @@ function splitSlashList(raw: string): string[] {
   return sanitizeList(raw.split('/').map((item) => item.trim()).filter(Boolean));
 }
 
+/** A Douban score as shown, or '-' for unrated titles (reported as 0 or empty). */
+function doubanScore(value: unknown): string {
+  const text = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
+  return text && Number(text) > 0 ? text : '-';
+}
+
 function normalizeArrayField(value: unknown): string[] {
   if (Array.isArray(value)) {
     return sanitizeList(value);
@@ -225,7 +231,7 @@ export async function getHot(type: 'movie' | 'tv', tag: string, limit = 20): Pro
       return {
         id,
         title,
-        rate: typeof item.rate === 'string' || typeof item.rate === 'number' ? String(item.rate) : '-',
+        rating: doubanScore(item.rate),
         url: typeof item.url === 'string' ? item.url : `${BASE}/subject/${id}/`,
         cover: typeof item.cover === 'string' ? item.cover : ''
       };
@@ -262,8 +268,8 @@ export async function getRank(typeId: number, limit = 20): Promise<RankItem[]> {
       return {
         id,
         title,
-        score: typeof item.score === 'string' || typeof item.score === 'number' ? String(item.score) : '-',
-        vote_count: typeof item.vote_count === 'number' && Number.isFinite(item.vote_count)
+        rating: doubanScore(item.score),
+        rating_count: typeof item.vote_count === 'number' && Number.isFinite(item.vote_count)
           ? Math.max(0, Math.trunc(item.vote_count))
           : 0,
         types: normalizeArrayField(item.types),
@@ -271,7 +277,7 @@ export async function getRank(typeId: number, limit = 20): Promise<RankItem[]> {
         release_date: typeof item.release_date === 'string' ? cleanText(item.release_date) : '',
         actors: normalizeArrayField(item.actors),
         url: typeof item.url === 'string' ? item.url : `${BASE}/subject/${id}/`,
-        cover_url: typeof item.cover_url === 'string' ? item.cover_url : ''
+        cover: typeof item.cover_url === 'string' ? item.cover_url : ''
       };
     })
     .filter((item): item is RankItem => item !== null);

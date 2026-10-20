@@ -34,7 +34,7 @@ export function registerAuthCommands(program: Command): void {
   program
     .command('login')
     .helpGroup('账号:')
-    .description('从浏览器读取，或显式导入豆瓣登录态')
+    .description('登录：读取浏览器里已登录的豆瓣，或导入 Cookie')
     .option('--browser <browser>', '明确从指定浏览器读取登录态（Arc 仅 macOS）')
     .option('--profile <profile>', '指定浏览器配置目录（需配合 --browser）')
     .option('--cookie-timeout <seconds>', '浏览器 Cookie/钥匙串读取超时（1-300 秒）')
@@ -103,7 +103,7 @@ export function registerAuthCommands(program: Command): void {
   program
     .command('whoami')
     .helpGroup('账号:')
-    .description('显示当前登录用户信息 [需登录]')
+    .description('当前登录的账号 [需登录]')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler({
       command: 'whoami',

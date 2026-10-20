@@ -29,15 +29,14 @@ $ npx @marvae24/douban-cli now
 
 ## 在 AI agent 里使用
 
-把这句话发给你的 agent（ChatGPT / Codex、Claude Code、pi 等）：
+把这句话发给你的 agent：
 
 > 安装这个 skill 并帮我配置好：https://github.com/Marvae/douban-cli/tree/main/skills/douban-cli
 
-或者在终端安装：
+或者在终端安装到本机支持 Agent Skills 的 agent：
 
 ```bash
-npx skills add Marvae/douban-cli          # 安装到本机支持 Agent Skills 的 agent
-pi install npm:@marvae24/douban-cli       # pi：同时装好 Skill 和 CLI
+npx skills add Marvae/douban-cli
 ```
 
 Skill 会在需要时帮你装好 CLI。用到账号功能时，需要你在自己的终端里运行一次 `douban login`。
@@ -64,8 +63,8 @@ douban book mark 2567698 --read --dry-run   # 先预览，确认后去掉 --dry-
 | 电影与剧集 | `hot` `tv` `rank` `top250` `now` `coming` `weekly` `search` `movie` `rating` `comments` `reviews` |
 | 图书 | `book top250` `chart` `new` `search` `info` `rating` `comments` `reviews` `notes` |
 | 用户与豆列 | `me` `book me` `user` `book user` `list` `config` |
-| 账号与备份 | `login` `whoami` `logout` `stats` `export` `book export` |
-| 修改记录 | `mark` `rate` `comment` `unmark` `record`，图书加 `book` 前缀；`review` `follow` `unfollow` |
+| 账号与备份 | `login` `whoami` `logout` `record` `book record` `stats` `export` `book export` |
+| 修改记录 | `mark` `rate` `comment` `unmark`，图书加 `book` 前缀；`review` `follow` `unfollow` |
 | 诊断 | `doctor` |
 
 每个命令都可以用 `douban <命令> --help` 查看参数。详细说明：[命令参考](docs/commands.md) · [登录、修改与导出](docs/account.md) · [脚本与排查](docs/scripting.md)

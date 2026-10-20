@@ -24,7 +24,7 @@ export function registerSocialCommands(program: Command): void {
   program
     .command('review <movieId> <title> [content]')
     .helpGroup('写入操作:')
-    .description('写长评 [需登录]')
+    .description('发布电影长评 [需登录]')
     .option('--file <path>', '从文件读取长评内容')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({

@@ -259,7 +259,7 @@ function registerKindCommands(parent: Command, profile: KindProfile): void {
 
   const unmark = group(parent.command('unmark [id]'))
     .description(`取消${noun}标记（同时删除评分、短评和标签） [需登录]`)
-    .option('--dry-run', '只预览，不提交')
+    .option('--dry-run', '只预览修改，不提交')
     .option('--file <path>', '批量模式：每行一个条目 ID')
     .option('--delay <seconds>', '批量请求间隔（秒），默认随机 1-2 秒')
     .option('--json', '以 JSON 输出');
@@ -275,8 +275,10 @@ function registerKindCommands(parent: Command, profile: KindProfile): void {
     ));
   }));
 
-  group(parent.command('record <id>'))
-    .description(`查看自己对某${measure}${noun}的记录（状态、评分、短评、标签、可见性） [需登录]`)
+  // Reading your own record is not a write: it sits with the account or book reads.
+  parent.command('record <id>')
+    .helpGroup(kind === 'book' ? '图书:' : '账号:')
+    .description(`我对某${measure}${noun}的记录（状态、评分、短评、标签、可见性） [需登录]`)
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler({
       command: `${prefix}record`,

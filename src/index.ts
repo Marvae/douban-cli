@@ -56,14 +56,13 @@ program.configureHelp({
     const visibleCommands = defaultHelp.visibleCommands(command);
     if (command !== program) return visibleCommands;
     // List `book` subcommands at the root. Book writes follow the movie writes
-    // so the 写入操作 group reads movie, then book, then reviews and follows.
+    // (which end with `unmark`) so 写入操作 reads movie, book, then reviews and follows.
     const bookCommands = defaultHelp.visibleCommands(bookCommand).filter((sub) => sub.name() !== 'help');
     const bookWrites = bookCommands.filter((sub) => sub.helpGroup() === '写入操作:');
     const flattened = visibleCommands.flatMap((sub) => (
       sub === bookCommand ? bookCommands.filter((bookSub) => !bookWrites.includes(bookSub)) : [sub]
     ));
-    let lastMovieWrite = -1;
-    flattened.forEach((sub, index) => { if (sub.name() === 'record') lastMovieWrite = index; });
+    const lastMovieWrite = flattened.findIndex((sub) => sub.name() === 'unmark');
     flattened.splice(lastMovieWrite + 1, 0, ...bookWrites);
     return flattened;
   },

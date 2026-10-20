@@ -69,7 +69,7 @@ douban unfollow USER_ID
 douban logout
 ```
 
-- `stats` 统计最近最多 1000 条“看过”记录（`--limit` 可调），较早的年份可能不完整。
+- `stats` 读取最近最多 1000 条“看过”记录（`--limit` 可调）；读满上限时会提示该年更早的记录没有统计到。
 - `stats`、`export`、`book export` 每页请求之间默认等待 1 秒（`--delay` 可调）。
 - `export --limit` 分别作用于看过、想看、在看三种状态，总条数最多约为 `3 × limit`。
 

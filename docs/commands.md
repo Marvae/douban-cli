@@ -15,7 +15,7 @@
 | `douban now` | 正在热映（全国） | `--limit` |
 | `douban coming` | 即将上映 | `--limit` |
 | `douban weekly` | 一周口碑榜与排名趋势 | `--limit` |
-| `douban search <keyword>` | 搜索电影（自动复用本地登录态，见下文） | `--start`、`--limit` |
+| `douban search <keyword>` | 搜索电影和剧集（自动复用本地登录态，见下文） | `--start`、`--limit` |
 | `douban movie <id-or-title>` | 电影/剧集详情，可直接传 ID 或片名 | `--json` |
 | `douban rating <id-or-title>` | 评分分布、想看/看过统计和类型排名 | ID 或片名 |
 | `douban comments <id-or-title>` | 热门短评 | `--page`、`--limit` |
@@ -86,11 +86,11 @@ douban book export USER_ID --reading -f csv -o reading.csv
 
 ## 用户收藏、豆列与配置
 
-| 命令 | 能做什么 | 登录要求 |
+| 命令 | 能做什么 | 说明 |
 |---|---|---|
 | `douban user <userId>` | 指定用户的电影看过/想看/在看 | 自动复用本地登录态；默认看过，使用 `--wish` 或 `--doing` 切换 |
 | `douban book user <userId>` | 指定用户当前可见的图书读过/想读/在读 | 自动复用本地登录态；默认读过，使用 `--wish` 或 `--reading` 切换 |
-| `douban config` | 查看本地配置；`--user <id>` 设置 `me` 的默认用户 | 无需登录 |
+| `douban config` | 查看本地配置；`--user <id>` 设置 `me` 和 `book me` 的默认用户 | 无需登录 |
 | `douban me` | `config --user` 指定的用户或当前登录账号的电影片单 | 默认看过，使用 `--wish` 或 `--doing` 切换；`--page`、`--limit` |
 | `douban list` | 热门豆列推荐 | 无需登录 |
 | `douban list <id-or-url>` | 读取豆列内容，自动翻页 | 无需登录；`--limit`（最多 1000）、`--start` |
