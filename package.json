@@ -1,6 +1,6 @@
 {
   "name": "@marvae24/douban-cli",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "豆瓣命令行工具和 AI Agent Skill：查电影、剧集、图书，导出备份豆瓣观影和读书记录 | Douban CLI for movies, books and your ratings",
   "type": "module",
   "main": "dist/index.js",
