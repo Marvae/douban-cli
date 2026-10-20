@@ -9,16 +9,17 @@ douban login
 douban whoami
 ```
 
-`login` 读取你浏览器里已有的豆瓣登录（只取 `dbcl2` / `ck`），确认账号后加密保存到本机。默认使用系统默认浏览器，不会自动打开窗口。
+`login` 读取你浏览器里已有的豆瓣登录（只取 `dbcl2` / `ck`），确认账号后加密保存到本机。默认使用系统默认浏览器；浏览器里还没登录豆瓣时，会先问你要不要打开登录页。
 
 ```bash
 douban login --browser arc                         # 指定浏览器：chrome、edge、firefox、safari、arc
 douban login --browser chrome --profile "Profile 2"
-douban login --open                                # 浏览器里还没登录豆瓣时，先打开豆瓣页面
+douban login --open                                # 直接打开豆瓣页面，不再询问
 douban login --cookie-timeout 120                  # 钥匙串授权较慢时延长等待（1-300 秒，默认 60）
 ```
 
-- 需要在交互式终端里运行；macOS 第一次读取 Chromium 系浏览器时会弹出钥匙串授权，选择允许。
+- 需要在交互式终端里运行。
+- macOS 读取 Chrome、Edge、Arc 的登录时会弹出钥匙串授权，每次登录只弹一次。选“允许”即可；“始终允许”以后不再询问，但本机其他程序也能借此读取这个浏览器的 Cookie。
 - Safari 和 Arc 仅支持 macOS；`--profile` 需要同时指定 `--browser`，且不能与 `--open` 同用。
 - 最终保存的账号以验证结果为准，可用 `douban whoami` 确认。
 
@@ -31,6 +32,11 @@ douban login --cookie-file /path/to/cookies.txt    # 浏览器扩展导出的 Ne
 ```
 
 不要把 Cookie 写进命令行参数、环境变量、聊天或 Issue；导入用的文件也是登录凭据，用完请删除。`login --json` 不会输出任何 Cookie。
+
+### 登录过期
+
+- 本地保存的登录 30 天后过期；剩 3 天时，账号命令会提醒你。`douban doctor` 也能看到剩余天数。
+- 在浏览器里退出豆瓣或修改密码后，本地登录也会失效。账号命令会提示重新运行 `douban login`；搜索和片单会自动改用匿名请求并提示。
 
 ## 标记、评分、短评与标签（电影和图书）
 

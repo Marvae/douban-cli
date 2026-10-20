@@ -336,6 +336,10 @@ function decodeAuthCache(contents: string): AuthSession {
   }
 }
 
+/** Set when readAuthCache discards a cache older than AUTH_CACHE_MAX_AGE_MS. */
+let discardedExpiredCache = false;
+const EXPIRY_WARNING_DAYS = 3;
+
 function isExpiredAuthSession(session: AuthSession): boolean {
   const updatedAt = Date.parse(session.updatedAt);
   if (!Number.isFinite(updatedAt)) return true;
@@ -395,6 +399,7 @@ function readAuthCache(): AuthSession | null {
     const session = decodeAuthCache(readFileSync(cachePath, 'utf8'));
     if (isExpiredAuthSession(session)) {
       unlinkIfExists(cachePath);
+      discardedExpiredCache = true;
       return null;
     }
     if (!migrationFailed && cachePath !== storagePaths.legacyAuthCachePath) {
@@ -1198,16 +1203,26 @@ export async function getOptionalSessionCookies(): Promise<string | undefined> {
 export async function ensureAuth(): Promise<VerifiedAuthSession> {
   const cached = readAuthCache();
   if (!cached) {
-    throw new Error('未找到本地登录态，请先运行 douban login');
+    throw new Error(discardedExpiredCache
+      ? '本地登录已过期（保存超过 30 天），请重新运行 douban login'
+      : '未找到本地登录态，请先运行 douban login');
   }
 
   let verified: VerifiedAuthSession;
   try {
     verified = await verifyAuthSession(cached);
   } catch (error) {
-    throw new Error(`无法验证本地登录态，已阻止本次操作：${error instanceof Error ? error.message : String(error)}`, {
+    const rejected = error instanceof Error && 'code' in error && error.code === 'AUTH_REQUIRED';
+    throw new Error(rejected
+      ? '本地登录已失效（可能已在浏览器中退出或修改了密码），请重新运行 douban login'
+      : `无法验证本地登录态，已阻止本次操作：${error instanceof Error ? error.message : String(error)}`, {
       cause: error
     });
+  }
+
+  const daysLeft = Math.ceil((Date.parse(cached.updatedAt) + AUTH_CACHE_MAX_AGE_MS - Date.now()) / 86_400_000);
+  if (daysLeft <= EXPIRY_WARNING_DAYS) {
+    console.error(`⚠️ 本地登录将在 ${Math.max(daysLeft, 0)} 天内过期，届时运行 douban login 重新登录`);
   }
 
   if (cached.accountId && cached.accountId !== verified.accountId) {

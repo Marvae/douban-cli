@@ -8,7 +8,7 @@ import {
   isRecord,
   normalizeTitle,
   ResponseSchemaError,
-  sessionHeaders,
+  withOptionalSession,
   type SessionReadOptions
 } from './common.js';
 import {
@@ -252,12 +252,11 @@ export async function getLatestBooks(category = '全部', limit = 20): Promise<B
   return items.slice(0, limit);
 }
 
-async function searchBookSuggestions(keyword: string, limit: number, cookies?: string): Promise<BookSearchItem[]> {
+async function searchBookSuggestions(keyword: string, limit: number, options: SessionReadOptions): Promise<BookSearchItem[]> {
   const url = `${BOOK_BASE}/j/subject_suggest?q=${encodeURIComponent(keyword)}`;
-  const response = await fetchJson<unknown>(url, {
-    Referer: `${BOOK_BASE}/`,
-    ...sessionHeaders(cookies)
-  });
+  const response = await withOptionalSession(options, (session) => (
+    fetchJson<unknown>(url, { Referer: `${BOOK_BASE}/`, ...session })
+  ));
 
   if (!Array.isArray(response)) {
     throw new ResponseSchemaError('图书建议接口返回格式异常', `${BOOK_BASE}/j/subject_suggest`);
@@ -326,7 +325,7 @@ export async function searchBooks(
   for (let pageNumber = 0; pageNumber < maxPages && results.length < limit; pageNumber += 1) {
     const url = `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(query)}&cat=1001&start=${pageStart}`;
     try {
-      const html = await fetchHtml(url, { Referer: 'https://www.douban.com/', ...sessionHeaders(options.cookies) });
+      const html = await withOptionalSession(options, (session) => fetchHtml(url, { Referer: 'https://www.douban.com/', ...session }));
 
       const page = parseBookSearchPage(html, url);
       if (page.start !== pageStart) {
@@ -360,7 +359,7 @@ export async function searchBooks(
     return [];
   }
   try {
-    const suggestions = await searchBookSuggestions(query, limit, options.cookies);
+    const suggestions = await searchBookSuggestions(query, limit, options);
     if (suggestions.length === 0 && firstPageError) throw firstPageError;
     if (firstPageError) {
       const reason = firstPageError instanceof Error ? firstPageError.message : String(firstPageError);

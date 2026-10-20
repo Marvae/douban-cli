@@ -1,5 +1,5 @@
 import { debug } from '../utils/debug.js';
-import { cleanText, fetchHtml, fetchHtmlPage } from './common.js';
+import { cleanText, fetchHtml, fetchHtmlPage, HttpRequestError, STALE_SESSION_WARNING } from './common.js';
 import {
   getUserCollectionPage,
   loadAuthenticatedUserCollectionPage,
@@ -8,15 +8,23 @@ import {
   type UserCollectionPageOptions
 } from './collection.js';
 
-/** Read with an explicitly supplied session, retaining anonymous access when absent. */
-export function getUserCollectionPageWithSession(
+/**
+ * Read with an explicitly supplied session, retaining anonymous access when it
+ * is absent or rejected.
+ */
+export async function getUserCollectionPageWithSession(
   options: UserCollectionPageOptions,
   cookies?: string
 ): Promise<UserCollectionPage> {
   const cookieHeader = cookies?.trim();
-  return cookieHeader
-    ? loadAuthenticatedUserCollectionPage(options, cookieHeader)
-    : getUserCollectionPage(options);
+  if (!cookieHeader) return getUserCollectionPage(options);
+  try {
+    return await loadAuthenticatedUserCollectionPage(options, cookieHeader);
+  } catch (error) {
+    if (!(error instanceof HttpRequestError && error.code === 'AUTH_REQUIRED')) throw error;
+    const page = await getUserCollectionPage(options);
+    return { ...page, warnings: [STALE_SESSION_WARNING, ...page.warnings] };
+  }
 }
 
 interface ProfileMatch {

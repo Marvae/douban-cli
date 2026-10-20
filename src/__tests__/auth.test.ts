@@ -133,6 +133,7 @@ describe('authentication safety', () => {
     await auth.loginFromCookieStdin(cookieStdin('dbcl2=mock-account'));
     vi.setSystemTime(new Date('2026-02-01T00:00:01.000Z'));
     await expect(auth.getOptionalSessionCookies()).resolves.toBeUndefined();
+    await expect(auth.ensureAuth()).rejects.toThrow('本地登录已过期');
   });
 
   it('ensureAuth uses only the local cache and never scans browsers implicitly', async () => {

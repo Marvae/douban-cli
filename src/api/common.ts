@@ -27,6 +27,27 @@ export function sessionHeaders(cookies: string | undefined): Record<string, stri
   return header ? { Cookie: header } : {};
 }
 
+export const STALE_SESSION_WARNING = '本地登录已失效，已改用匿名请求；运行 douban login 重新登录';
+
+/**
+ * Run a read with the optional session. If Douban rejects the session, drop it
+ * for the rest of the call and retry anonymously once.
+ */
+export async function withOptionalSession<T>(
+  options: SessionReadOptions,
+  read: (headers: Record<string, string>) => Promise<T>
+): Promise<T> {
+  if (!options.cookies?.trim()) return read({});
+  try {
+    return await read(sessionHeaders(options.cookies));
+  } catch (error) {
+    if (!(error instanceof HttpRequestError && error.code === 'AUTH_REQUIRED')) throw error;
+    options.cookies = undefined;
+    if (!options.warnings?.includes(STALE_SESSION_WARNING)) options.warnings?.push(STALE_SESSION_WARNING);
+    return read({});
+  }
+}
+
 /** Search pages report throttling in `__DATA__.error_info` alongside an otherwise valid empty result. */
 export function assertSearchAvailable(data: Record<string, unknown>, url: string): void {
   const info = typeof data.error_info === 'string' ? data.error_info.trim() : '';

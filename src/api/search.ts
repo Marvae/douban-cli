@@ -7,7 +7,7 @@ import {
   isRecord,
   normalizeTitle,
   ResponseSchemaError,
-  sessionHeaders,
+  withOptionalSession,
   type SessionReadOptions
 } from './common.js';
 import { debug } from '../utils/debug.js';
@@ -50,12 +50,11 @@ function readPaginationValue(
   return value;
 }
 
-async function fetchSuggestions(keyword: string, cookies?: string): Promise<SuggestResult> {
+async function fetchSuggestions(keyword: string, options: SessionReadOptions): Promise<SuggestResult> {
   const url = `https://movie.douban.com/j/subject_suggest?q=${encodeURIComponent(keyword)}`;
-  const response = await fetchJson<unknown>(url, {
-    Referer: 'https://movie.douban.com/',
-    ...sessionHeaders(cookies)
-  });
+  const response = await withOptionalSession(options, (session) => (
+    fetchJson<unknown>(url, { Referer: 'https://movie.douban.com/', ...session })
+  ));
   if (!Array.isArray(response)) {
     throw new ResponseSchemaError('电影建议接口返回格式异常', url);
   }
@@ -152,7 +151,7 @@ export async function searchMovies(
   if (!Number.isInteger(start) || start < 0) throw new Error('start 必须是非负整数');
   if (!Number.isInteger(limit) || limit <= 0) return [];
 
-  const suggestionPromise = fetchSuggestions(query, options.cookies).catch((error): SuggestResult => {
+  const suggestionPromise = fetchSuggestions(query, { ...options }).catch((error): SuggestResult => {
     const message = error instanceof Error ? error.message : String(error);
     debug('search', `suggest 接口失败: ${message}`);
     return { years: new Map<string, string>(), items: [] };
@@ -168,7 +167,7 @@ export async function searchMovies(
     const pageUrl = `https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(query)}&cat=1002&start=${pageStart}`;
     let page: MovieSearchPage;
     try {
-      const html = await fetchHtml(pageUrl, { Referer: 'https://www.douban.com/', ...sessionHeaders(options.cookies) });
+      const html = await withOptionalSession(options, (session) => fetchHtml(pageUrl, { Referer: 'https://www.douban.com/', ...session }));
       page = parseMovieSearchPage(html, pageUrl);
       if (page.start !== pageStart) {
         throw new ResponseSchemaError(`电影搜索分页起点异常：请求 ${pageStart}，返回 ${page.start}`, pageUrl);

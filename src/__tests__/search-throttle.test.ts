@@ -44,6 +44,20 @@ describe('search', () => {
       .toEqual(['dbcl2=FAKE', 'dbcl2=FAKE']);
   });
 
+  it('retries anonymously when Douban rejects the saved session', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (String(input).includes('subject_suggest')) return Response.json([]);
+      return new Headers(init?.headers).get('Cookie')
+        ? new Response('<title>登录豆瓣</title>', { headers: { 'Content-Type': 'text/html' } })
+        : searchPage([{ id: '3001114', title: '沙丘' }]);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const warnings: string[] = [];
+
+    await expect(searchMovies('沙丘', 0, 5, { cookies: 'dbcl2=STALE', warnings })).resolves.toHaveLength(1);
+    expect(warnings).toEqual([expect.stringContaining('本地登录已失效')]);
+  });
+
   it('warns when a throttled search falls back to suggestions', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: FetchInput) => (
       String(input).includes('subject_suggest')
