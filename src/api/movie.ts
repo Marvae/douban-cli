@@ -2,9 +2,12 @@ import { BASE, cleanText, extractField, fetchHtml, fetchJson, HttpRequestError, 
 import {
   getSubjectComments,
   getSubjectRatingStats,
+  getSubjectCollection,
   getSubjectReviews,
   getTop250Subjects,
+  parseSubjectRecommendations,
   type SubjectCommentItem,
+  type SubjectRecommendation,
   type SubjectPaginatedResult,
   type SubjectRatingStats,
   type SubjectReviewItem
@@ -50,8 +53,20 @@ export interface MovieDetail {
   review_count: number;
   summary: string;
   url: string;
+  /** "喜欢这部电影的人也喜欢"; empty when the page block is unavailable. */
+  recommendations: SubjectRecommendation[];
   episodes_count?: number;
   episodes_info?: string;
+}
+
+export interface NowShowingItem {
+  id: string;
+  title: string;
+  rating: string;
+  release_date: string;
+  meta: string;
+  url: string;
+  cover: string;
 }
 
 interface MovieAbstractResponse {
@@ -202,7 +217,8 @@ function emptyMovieDetail(id: string, url: string): MovieDetail {
     comment_count: 0,
     review_count: 0,
     summary: '',
-    url
+    url,
+    recommendations: []
   };
 }
 
@@ -345,6 +361,7 @@ function parseMovieDetailFromHtml(id: string, html: string): MovieDetail | null 
     review_count: extractCountByPath(html, 'reviews'),
     summary,
     url: `${BASE}/subject/${id}/`,
+    recommendations: parseSubjectRecommendations(html, 'movie'),
     episodes_count: episodesCount > 0 ? episodesCount : undefined,
     episodes_info: episodesInfo || undefined
   };
@@ -636,6 +653,25 @@ export async function getComing(limit = 20): Promise<ComingItem[]> {
   }
 
   return results;
+}
+
+/**
+ * Movies now showing nationwide, from the public mobile collection. The
+ * city-specific cinema pages require verification for anonymous clients.
+ */
+export async function getNowShowing(limit = 20): Promise<NowShowingItem[]> {
+  if (!Number.isInteger(limit) || limit <= 0) return [];
+  const results: NowShowingItem[] = [];
+  let start = 0;
+  while (results.length < limit) {
+    const { items, total } = await getSubjectCollection('movie', 'movie_showing', start, Math.min(50, limit - results.length));
+    for (const { id, title, rating, release_date, meta, url, cover } of items) {
+      results.push({ id, title, rating, release_date: release_date ?? '-', meta, url, cover });
+    }
+    start += items.length;
+    if (items.length === 0 || start >= total) break;
+  }
+  return results.slice(0, limit);
 }
 
 /**

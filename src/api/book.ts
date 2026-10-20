@@ -24,6 +24,7 @@ import {
   getSubjectReviews,
   getTop250Subjects,
   type SubjectPaginatedResult,
+  type SubjectRecommendation,
   type SubjectCommentItem,
   type SubjectRatingStats,
   type SubjectReviewItem
@@ -82,6 +83,8 @@ export interface BookDetail {
   series: BookSeries | null;
   has_ebook: boolean;
   url: string;
+  /** "喜欢读这本书的人也喜欢"; empty when the page block is unavailable. */
+  recommendations: SubjectRecommendation[];
 }
 
 export interface BookNoteItem {
@@ -497,7 +500,8 @@ export async function getBookInfo(id: string): Promise<BookDetail> {
     cover: cleanText(mobile?.cover_url || mobilePic) || html?.cover || '',
     series: mobileSeries || (html?.series ? { ...html.series } : null),
     has_ebook: mobile?.has_ebook === true,
-    url: cleanText(mobile?.url || '') || url
+    url: cleanText(mobile?.url || '') || url,
+    recommendations: html?.recommendations ?? []
   };
 }
 

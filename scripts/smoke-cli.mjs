@@ -20,13 +20,14 @@ assert.equal(rootHelp.status, 0);
 assert.match(rootHelp.stdout, /douban - 豆瓣命令行工具 v\d+/);
 assert.doesNotMatch(rootHelp.stdout, /vundefined/);
 assert.match(rootHelp.stdout, /电影:/);
-assert.match(rootHelp.stdout, /书籍:/);
-assert.match(rootHelp.stdout, /收藏与账号:/);
+assert.match(rootHelp.stdout, /图书:/);
+assert.match(rootHelp.stdout, /用户与豆列:/);
+assert.match(rootHelp.stdout, /账号:/);
 assert.match(rootHelp.stdout, /写入操作:/);
-const bookSection = rootHelp.stdout.match(/书籍:\n([\s\S]*?)\n收藏与账号:/)?.[1];
+const bookSection = rootHelp.stdout.match(/图书:\n([\s\S]*?)\n用户与豆列:/)?.[1];
 assert.ok(bookSection);
+assert.doesNotMatch(bookSection, /book hot/);
 for (const bookCommand of [
-  'hot',
   'top250',
   'user',
   'export',

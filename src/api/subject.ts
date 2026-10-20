@@ -3,7 +3,7 @@ import { debug } from '../utils/debug.js';
 
 export type SubjectKind = 'movie' | 'book';
 
-export interface Top250Subject {
+export interface CollectionSubject {
   id: string;
   title: string;
   rank: number;
@@ -12,43 +12,92 @@ export interface Top250Subject {
   meta: string;
   cover: string;
   description: string;
+  /** Release date such as `10.05`; present on now-showing lists. */
+  release_date?: string;
   url: string;
 }
 
-/** Public mobile ranking source for desktop pages that require verification. */
-export async function getTop250Subjects(kind: SubjectKind, start: number): Promise<Top250Subject[]> {
+/** Read a public mobile collection such as `movie_top250` or `movie_showing`. */
+export async function getSubjectCollection(
+  kind: SubjectKind,
+  collection: string,
+  start = 0,
+  count = 25
+): Promise<{ items: CollectionSubject[]; total: number }> {
   if (!Number.isInteger(start) || start < 0) throw new Error('start 必须是非负整数');
-  const collection = `${kind}_top250`;
-  const url = `https://m.douban.com/rexxar/api/v2/subject_collection/${collection}/items?start=${start}&count=25`;
+  const url = `https://m.douban.com/rexxar/api/v2/subject_collection/${collection}/items?start=${start}&count=${count}`;
   const data = await fetchJson<unknown>(url, {
     Referer: `https://m.douban.com/subject_collection/${collection}`
   });
-  if (!isRecord(data) || !Array.isArray(data.subject_collection_items)
-    || data.start !== start) {
-    throw new ResponseSchemaError('Top250 移动榜单返回格式或分页起点异常', url);
+  if (!isRecord(data) || !Array.isArray(data.subject_collection_items) || data.start !== start) {
+    throw new ResponseSchemaError('移动榜单返回格式或分页起点异常', url);
   }
-  const items = data.subject_collection_items.flatMap((item, index): Top250Subject[] => {
+  const items = data.subject_collection_items.flatMap((item, index): CollectionSubject[] => {
     if (!isRecord(item)) return [];
     const id = String(item.id ?? '');
     const title = typeof item.title === 'string' ? cleanText(item.title) : '';
     if (!/^\d+$/.test(id) || !title) return [];
     const rating = isRecord(item.rating) ? item.rating : {};
+    const cover = typeof item.cover_url === 'string'
+      ? item.cover_url
+      : isRecord(item.cover) && typeof item.cover.url === 'string' ? item.cover.url : '';
     return [{
       id,
       title,
       rank: Number.isInteger(item.rank) && Number(item.rank) > 0 ? Number(item.rank) : start + index + 1,
-      rating: typeof rating.value === 'number' && Number.isFinite(rating.value) ? rating.value.toFixed(1) : '-',
+      rating: typeof rating.value === 'number' && Number.isFinite(rating.value) && rating.value > 0 ? rating.value.toFixed(1) : '-',
       votes: typeof rating.count === 'number' ? `${rating.count}人评价` : '-',
       meta: typeof item.card_subtitle === 'string' ? cleanText(item.card_subtitle) : '-',
-      cover: typeof item.cover_url === 'string' ? item.cover_url : '',
+      cover,
       description: typeof item.description === 'string' ? cleanText(item.description) : '',
+      ...(typeof item.release_date === 'string' && item.release_date ? { release_date: item.release_date } : {}),
       url: `https://${kind}.douban.com/subject/${id}/`
     }];
   });
-  if (items.length !== data.subject_collection_items.length || (items.length === 0 && start < 250)) {
-    throw new ResponseSchemaError('Top250 移动榜单包含无效条目', url);
+  if (items.length !== data.subject_collection_items.length) {
+    throw new ResponseSchemaError('移动榜单包含无效条目', url);
+  }
+  const total = typeof data.total === 'number' && Number.isInteger(data.total) ? data.total : start + items.length;
+  return { items, total };
+}
+
+/** Public mobile Top250 page of 25 items, used when the desktop page is unavailable. */
+export async function getTop250Subjects(kind: SubjectKind, start: number): Promise<CollectionSubject[]> {
+  const { items } = await getSubjectCollection(kind, `${kind}_top250`, start);
+  if (items.length === 0 && start < 250) {
+    throw new ResponseSchemaError('Top250 移动榜单未返回条目', `https://m.douban.com/subject_collection/${kind}_top250`);
   }
   return items;
+}
+
+export interface SubjectRecommendation {
+  id: string;
+  title: string;
+  rating: string;
+  url: string;
+}
+
+/** Parse the "喜欢这部/本的人也喜欢" block; empty when the page has none. */
+export function parseSubjectRecommendations(html: string, kind: SubjectKind): SubjectRecommendation[] {
+  const marker = kind === 'movie' ? /class=["'][^"']*recommendations-bd/ : /id=["']db-rec-section["']/;
+  const start = html.search(marker);
+  if (start < 0) return [];
+  // The <dl> items are siblings; the block ends where the last </dl> meets </div>.
+  let section = html.slice(start);
+  const end = section.search(/<\/dl>\s*<\/div>/);
+  if (end >= 0) section = section.slice(0, end + '</dl>'.length);
+  const seen = new Set<string>();
+  const results: SubjectRecommendation[] = [];
+  for (const block of section.split(/<dl\b/i).slice(1)) {
+    const id = block.match(new RegExp(`https://${kind}\\.douban\\.com/subject/(\\d+)/`))?.[1];
+    const title = cleanText(block.match(/<dd[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/i)?.[1] ?? '');
+    if (!id || !title || seen.has(id)) continue;
+    seen.add(id);
+    const rating = cleanText(block.match(/class=["']subject-rate["'][^>]*>([\s\S]*?)<\//i)?.[1] ?? '');
+    results.push({ id, title, rating: rating || '-', url: `https://${kind}.douban.com/subject/${id}/` });
+    if (results.length >= 10) break;
+  }
+  return results;
 }
 
 export interface SubjectReviewItem {

@@ -163,7 +163,7 @@ export function registerSocialCommands(program: Command): void {
 
   program
     .command('stats')
-    .helpGroup('收藏与账号:')
+    .helpGroup('账号:')
     .description('我的统计（今年看了多少片） [需登录]')
     .option('-y, --year <year>', '统计年份，默认今年')
     .option('-n, --limit <n>', '最多读取的看过记录数', '1000')
@@ -211,7 +211,7 @@ export function registerSocialCommands(program: Command): void {
 
   program
     .command('export')
-    .helpGroup('收藏与账号:')
+    .helpGroup('账号:')
     .description('导出我的观影记录 [需登录]')
     .requiredOption('-o, --output <path>', '输出文件路径（包含个人数据，必须明确指定）')
     .option('-f, --format <format>', '导出格式：json/csv', 'json')

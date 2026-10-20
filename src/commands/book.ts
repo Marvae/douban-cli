@@ -97,7 +97,7 @@ async function resolveBookId(input: string, outputJson: boolean): Promise<string
 function registerTop250Command(book: Command, name: 'hot' | 'top250'): void {
   const legacy = name === 'hot';
   book
-    .command(name)
+    .command(name, { hidden: legacy })
     .description(legacy ? '获取热门书籍（兼容旧版，等同 Top250）' : '获取豆瓣图书 Top250')
     .option('-s, --start <n>', '起始偏移', '0')
     .option('-n, --limit <n>', '返回数量', '20')
@@ -124,9 +124,10 @@ function registerTop250Command(book: Command, name: 'hot' | 'top250'): void {
 export function registerBookCommands(program: Command): Command {
   const book = program
     .command('book')
-    .helpGroup('书籍:')
-    .commandsGroup('书籍:')
-    .description('豆瓣书籍：榜单、搜索、详情、评分、短评、书评、笔记与收藏');
+    .helpGroup('图书:')
+    .commandsGroup('图书:')
+    .description('豆瓣图书：榜单、搜索、详情、评分、短评、书评、笔记、书单与写入')
+    .helpCommand(false);
 
   registerTop250Command(book, 'hot');
   registerTop250Command(book, 'top250');
@@ -243,6 +244,9 @@ export function registerBookCommands(program: Command): Command {
       console.log(`\n简介:\n${detail.summary}`);
       if (detail.author_intro !== '-') console.log(`\n作者简介:\n${detail.author_intro}`);
       if (detail.catalog !== '-') console.log(`\n目录:\n${detail.catalog}`);
+      if (detail.recommendations.length > 0) {
+        console.log(`\n相似推荐: ${detail.recommendations.map((item) => `${item.title}(${item.rating})`).join(' / ')}`);
+      }
       console.log(`\n链接: ${detail.url}`);
     }));
 

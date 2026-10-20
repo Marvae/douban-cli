@@ -7,6 +7,7 @@ import {
   normalizeTitle,
   ResponseSchemaError
 } from './common.js';
+import { parseSubjectRecommendations, type SubjectRecommendation } from './subject.js';
 
 export interface ParsedBookListItem {
   id: string;
@@ -51,6 +52,7 @@ export interface ParsedBookDetail {
   author_intro?: string;
   catalog?: string;
   cover?: string;
+  recommendations?: SubjectRecommendation[];
 }
 
 function parseCount(value: string): number {
@@ -284,6 +286,7 @@ export function parseBookDetailHtml(html: string): ParsedBookDetail {
         : undefined,
     author_intro: extractSection(html, '作者简介') || undefined,
     catalog: extractSection(html, '目录') || undefined,
-    cover: coverMatch?.[1]
+    cover: coverMatch?.[1],
+    recommendations: parseSubjectRecommendations(html, 'book')
   };
 }

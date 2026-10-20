@@ -101,7 +101,7 @@ function writeConfig(config: CliConfig): void {
 export function registerUserCommands(program: Command): void {
   program
     .command('user <userId>')
-    .helpGroup('收藏与账号:')
+    .helpGroup('用户与豆列:')
     .description('获取指定用户的电影片单')
     .option('--wish', '查看"想看"列表（默认看过）')
     .option('--doing', '查看"在看"列表')
@@ -197,7 +197,7 @@ export function registerUserCommands(program: Command): void {
 
   program
     .command('config')
-    .helpGroup('收藏与账号:')
+    .helpGroup('用户与豆列:')
     .description('设置本地 douban-cli 配置')
     .option('--user <id>', '设置 me 命令默认用户 ID')
     .option('--json', '以 JSON 输出')
@@ -231,7 +231,7 @@ export function registerUserCommands(program: Command): void {
 
   program
     .command('me')
-    .helpGroup('收藏与账号:')
+    .helpGroup('用户与豆列:')
     .description('获取配置用户的个人片单')
     .option('--wish', '查看"想看"列表（默认看过）')
     .option('--doing', '查看"在看"列表')

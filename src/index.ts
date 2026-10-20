@@ -18,7 +18,8 @@ const program = new Command();
 
 program
   .name('douban')
-  .description('豆瓣命令行工具（电影 / 书籍 / 用户）')
+  .description('豆瓣命令行工具（电影 / 图书 / 豆列 / 账号）')
+  .helpCommand(false)
   .version(pkg.version || '0.0.0', '-V, --version', '显示版本')
   .helpOption('-h, --help', '显示帮助')
   .exitOverride()
@@ -27,10 +28,11 @@ program
     outputError: () => undefined
   });
 
+// Registration order sets the help group order: movies, books, users and
+// doulists, account, writes.
 registerMovieCommands(program);
 const bookCommand = registerBookCommands(program);
 registerUserCommands(program);
-
 registerListCommands(program);
 registerAuthCommands(program);
 registerMarkCommands(program, bookCommand);
@@ -40,13 +42,18 @@ const defaultHelp = new Help();
 program.configureHelp({
   visibleCommands: (command) => {
     const visibleCommands = defaultHelp.visibleCommands(command);
-    const visibleBookCommands = new Set(defaultHelp.visibleCommands(bookCommand));
-
-    return visibleCommands.flatMap((subcommand) => (
-      subcommand === bookCommand
-        ? bookCommand.commands.filter((bookSubcommand) => visibleBookCommands.has(bookSubcommand))
-        : [subcommand]
+    if (command !== program) return visibleCommands;
+    // List `book` subcommands at the root. Book writes follow the movie writes
+    // so the 写入操作 group reads movie, then book, then reviews and follows.
+    const bookCommands = defaultHelp.visibleCommands(bookCommand).filter((sub) => sub.name() !== 'help');
+    const bookWrites = bookCommands.filter((sub) => sub.helpGroup() === '写入操作:');
+    const flattened = visibleCommands.flatMap((sub) => (
+      sub === bookCommand ? bookCommands.filter((bookSub) => !bookWrites.includes(bookSub)) : [sub]
     ));
+    let lastMovieWrite = -1;
+    flattened.forEach((sub, index) => { if (sub.name() === 'record') lastMovieWrite = index; });
+    flattened.splice(lastMovieWrite + 1, 0, ...bookWrites);
+    return flattened;
   },
   subcommandTerm: (command) => (
     command.parent === bookCommand
@@ -58,12 +65,13 @@ program.configureHelp({
 program.addHelpText('beforeAll', () => `douban - 豆瓣命令行工具 v${program.version()}\n`);
 program.addHelpText('after', () => `
 示例:
-  douban hot             查看热门电影
-  douban search 沙丘     搜索电影
-  douban top250          豆瓣 Top 250
-  douban movie 1292052   查看电影详情
-  douban book chart      查看当前热门图书榜
-  douban book info 三体  查看书籍详情
+  douban now                     正在热映
+  douban movie 沙丘              电影详情（ID 或片名）
+  douban book info 三体          图书详情（ID、ISBN 或书名）
+  douban list 240962             读取豆列
+  douban login                   登录后可标记、评分、写短评
+  douban <命令> --help           查看某个命令的完整参数
+  文档: https://github.com/Marvae/douban-cli#readme
 `);
 
 program.parseAsync().catch((error) => {

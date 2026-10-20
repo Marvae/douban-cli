@@ -5,6 +5,7 @@ import {
   getComments,
   getHot,
   getMovieDetail,
+  getNowShowing,
   getRank,
   getRatingStats,
   getReviews,
@@ -434,6 +435,9 @@ export function registerMovieCommands(program: Command): void {
         console.log(`导演: ${detail.directors.length > 0 ? detail.directors.join(' / ') : '-'}`);
         console.log(`演员: ${detail.actors.length > 0 ? detail.actors.join(' / ') : '-'}`);
         console.log(`\n简介:\n${detail.summary || '-'}`);
+        if (detail.recommendations.length > 0) {
+          console.log(`\n相似推荐: ${detail.recommendations.map((item) => `${item.title}(${item.rating})`).join(' / ')}`);
+        }
         console.log(`\n链接: ${detail.url}`);
       }
     }));
@@ -479,6 +483,33 @@ export function registerMovieCommands(program: Command): void {
             console.log(`${r.type}: 超过 ${Math.round(r.rank * 100)}% 同类作品`);
           });
         }
+      }
+    }));
+
+  program
+    .command('now')
+    .helpGroup('电影:')
+    .description('获取正在热映电影（全国）')
+    .option('-n, --limit <n>', '返回数量', '20')
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'now',
+      suggestion: '可尝试：douban now -n 10'
+    }, async (opts) => {
+      const limit = parsePositiveInt(opts.limit, '--limit', 20);
+      const items = await withSpinner('正在获取正在热映电影...', () => getNowShowing(limit), !opts.json);
+
+      if (opts.json) {
+        console.log(JSON.stringify(items, null, 2));
+      } else {
+        console.log('\n🍿 正在热映\n');
+        renderTable(items, [
+          { header: '#', value: (_, i) => String(i + 1), minWidth: 2 },
+          { header: '片名', value: (item) => item.title, minWidth: 18 },
+          { header: '评分', value: (item) => item.rating },
+          { header: '上映', value: (item) => item.release_date },
+          { header: 'ID', value: (item) => item.id }
+        ]);
       }
     }));
 
