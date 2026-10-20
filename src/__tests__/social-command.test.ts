@@ -72,7 +72,7 @@ describe('social commands', () => {
       'collect',
       1000,
       'dbcl2=secret',
-      { pageDelayMs: 1000 }
+      expect.objectContaining({ pageDelayMs: 1000 })
     );
     expect(JSON.parse(String(stdout.mock.calls[0]?.[0]))).toMatchObject({
       user: {
@@ -109,7 +109,7 @@ describe('social commands', () => {
       'collect',
       30,
       'dbcl2=secret',
-      { pageDelayMs: 2000 }
+      expect.objectContaining({ pageDelayMs: 2000 })
     );
   });
 
@@ -156,7 +156,7 @@ describe('social commands', () => {
       ['alice', 'do', 1000, 'dbcl2=secret']
     ]);
     mocks.getCollectionRecords.mock.calls.forEach((call) => {
-      expect(call[4]).toEqual({ pageDelayMs: 2000 });
+      expect(call[4]).toEqual(expect.objectContaining({ pageDelayMs: 2000 }));
     });
     expect(mocks.sleep).toHaveBeenCalledTimes(2);
     expect(mocks.sleep).toHaveBeenNthCalledWith(1, 2000);

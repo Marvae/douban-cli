@@ -198,7 +198,8 @@ describe('book collection commands', () => {
         status: 'wish',
         start: 0,
         count: 3,
-        pageDelayMs: 2000
+        pageDelayMs: 2000,
+        onProgress: expect.any(Function)
       },
       'dbcl2=alice; ck=token'
     );
@@ -210,7 +211,8 @@ describe('book collection commands', () => {
         status: 'wish',
         start: 2,
         count: 1,
-        pageDelayMs: 2000
+        pageDelayMs: 2000,
+        onProgress: expect.any(Function)
       },
       'dbcl2=alice; ck=token'
     );

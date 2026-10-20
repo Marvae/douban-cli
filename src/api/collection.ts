@@ -22,6 +22,8 @@ export interface UserCollectionPageOptions {
   start?: number;
   count?: number;
   pageDelayMs?: number;
+  /** Called with the number of items read so far after each upstream page. */
+  onProgress?: (fetched: number) => void;
 }
 
 export interface UserCollectionPage {
@@ -339,6 +341,7 @@ async function loadUserCollectionPage(
       results.push(item);
       if (results.length >= count) break;
     }
+    options.onProgress?.(results.length);
 
     if (results.length >= count && consumedFromPage < page.items.length) {
       nextStart = cursor + consumedFromPage;

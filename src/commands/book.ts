@@ -17,7 +17,7 @@ import {
   type BookItem
 } from '../api/book.js';
 import { getOptionalSessionCookies } from '../auth.js';
-import { printWarnings, withErrorHandler } from '../utils/error.js';
+import { CliArgumentError, printWarnings, withErrorHandler } from '../utils/error.js';
 import {
   getPageRange,
   isNumericId,
@@ -109,6 +109,7 @@ function registerTop250Command(book: Command, name: 'hot' | 'top250'): void {
         : '可尝试：douban book top250 -n 30'
     }, async (opts) => {
       const start = parseNonNegativeInt(opts.start, '--start', 0);
+      if (start >= 250) throw new CliArgumentError('--start 必须小于 250（Top250 共 250 本）');
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const items = await withSpinner(
         '正在获取图书 Top250...',

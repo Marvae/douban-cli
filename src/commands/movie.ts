@@ -14,13 +14,14 @@ import {
 } from '../api/movie.js';
 import { searchMovies } from '../api/search.js';
 import { getOptionalSessionCookies } from '../auth.js';
-import { printWarnings, withErrorHandler } from '../utils/error.js';
+import { CliArgumentError, printWarnings, withErrorHandler } from '../utils/error.js';
 import {
   getPageRange,
   isNumericId,
   pageToOffset,
   parseNonNegativeInt,
-  parsePositiveInt
+  parsePositiveInt,
+  parsePositiveIntAtMost
 } from '../utils/parsing.js';
 import { withSpinner } from '../utils/spinner.js';
 import { withPagination } from '../utils/pagination.js';
@@ -259,13 +260,13 @@ export function registerMovieCommands(program: Command): void {
     .action(withErrorHandler((args) => ({
       command: 'rank',
       target: `类型: ${String(args[0] || '未指定')}`,
-      options: `可用类型：${Object.keys(GENRES).join('、')}`,
+      options: `${Object.keys(GENRES).join('、')}`,
       suggestion: '可尝试：douban rank 科幻'
     }), async (genre, opts) => {
       const limit = parsePositiveInt(opts.limit, '--limit', 20);
       const typeId = GENRES[genre];
       if (!typeId) {
-        throw new Error(`未知类型: ${genre}。可选类型：${Object.keys(GENRES).join('、')}`);
+        throw new CliArgumentError('不支持这个类型');
       }
 
       const items = await withSpinner(
@@ -299,7 +300,7 @@ export function registerMovieCommands(program: Command): void {
       command: 'top250',
       suggestion: '可尝试：douban top250 --page 2'
     }, async (opts) => {
-      const page = parsePositiveInt(opts.page, '--page', 1);
+      const page = parsePositiveIntAtMost(opts.page, '--page', 1, 10);
       const total = 250;
       const limit = 25;
 

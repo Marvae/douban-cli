@@ -173,7 +173,8 @@ async function fetchBookCollectionExport(
   status: CollectionStatus,
   limit: number,
   pageDelayMs: number,
-  cookies?: string
+  cookies?: string,
+  onProgress?: (fetched: number) => void
 ): Promise<ExportResult> {
   const items: UserCollectionItem[] = [];
   const seenItems = new Set<string>();
@@ -206,7 +207,8 @@ async function fetchBookCollectionExport(
           status,
           start: nextStart,
           count: Math.min(EXPORT_BATCH_SIZE, limit - items.length),
-          pageDelayMs
+          pageDelayMs,
+          onProgress: (count) => onProgress?.(items.length + count)
         },
         cookies
       );
@@ -345,9 +347,10 @@ export function registerBookCollectionCommands(book: Command): void {
       const format = resolveExportFormat(opts.format, outputPath);
       // Reuse the same session across all export pages.
       const cookies = await getOptionalSessionCookies();
+      let fetched = 0;
       const result = await withSpinner(
-        `正在导出用户 ${userId} 的${statusLabel}书单...`,
-        () => fetchBookCollectionExport(userId, status, limit, pageDelayMs, cookies),
+        () => `正在导出用户 ${userId} 的${statusLabel}书单... 已读取 ${fetched} 条`,
+        () => fetchBookCollectionExport(userId, status, limit, pageDelayMs, cookies, (count) => { fetched = count; }),
         true
       );
       emitWarnings(result);

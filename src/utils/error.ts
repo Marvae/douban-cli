@@ -78,6 +78,35 @@ function redactSensitiveArguments(
   );
 }
 
+/** Commander reports parse errors in English; show them in the CLI's language. */
+function translateCommanderMessage(message: string): string {
+  const didYouMean = message.match(/\(Did you mean (.+?)\?\)/)?.[1];
+  const hint = didYouMean ? `，你是不是想用 ${didYouMean}？` : '';
+  const text = message.replace(/^error:\s*/, '');
+  let match: RegExpMatchArray | null;
+  if ((match = text.match(/^unknown command '(.+?)'/))) return `未知命令：${match[1]}${hint}`;
+  if ((match = text.match(/^unknown option '(.+?)'/))) return `未知选项：${match[1]}${hint}`;
+  if ((match = text.match(/^missing required argument '(.+?)'/))) return `缺少参数 <${match[1]}>`;
+  if ((match = text.match(/^required option '(.+?)' not specified/))) return `缺少必需选项 ${match[1]}`;
+  if ((match = text.match(/^option '(.+?)' argument missing/))) return `选项 ${match[1]} 缺少取值`;
+  if ((match = text.match(/^too many arguments(?: for '(.+?)')?\. Expected (\d+) arguments? but got (\d+)(?:: ([\s\S]*?))?\.?$/))) {
+    const [, command, expected, received, extra] = match;
+    return `参数过多：${command ? `${command} ` : '该命令'}需要 ${expected} 个参数，收到 ${received} 个${extra ? `：${extra}` : ''}`;
+  }
+  return text;
+}
+
+/** The command words the user typed, such as `book export`, up to the first option. */
+function typedCommandPath(argv: readonly string[] = process.argv.slice(2)): string[] {
+  const words: string[] = [];
+  for (const token of argv) {
+    if (token.startsWith('-')) break;
+    words.push(token);
+    if (words[0] !== 'book' || words.length === 2) break;
+  }
+  return words;
+}
+
 function isCommanderError(error: unknown): error is CommanderErrorLike {
   return error instanceof Error && 'code' in error && String((error as CommanderErrorLike).code).startsWith('commander.');
 }
@@ -175,7 +204,7 @@ function isJsonOutputRequested(argv: readonly string[] = process.argv.slice(2)):
 }
 
 function createErrorPayload(error: unknown, ctx: CommandErrorContext): CliErrorPayload {
-  const rawMessage = toMessage(error);
+  const rawMessage = isCommanderError(error) ? translateCommanderMessage(toMessage(error)) : toMessage(error);
   const message = redactSensitiveArguments(rawMessage);
   const target = ctx.target ? redactSensitiveArguments(ctx.target) : undefined;
   let recovery = ctx.suggestion;
@@ -241,9 +270,15 @@ export function handleProgramError(error: unknown): void {
     return;
   }
 
-  printCliError(error, {
-    command: 'douban',
-    suggestion: '可运行 douban --help 查看可用命令'
-  });
+  const path = typedCommandPath();
+  let suggestion = `运行 douban ${path.join(' ')} --help 查看用法`;
+  if (isCommanderError(error) && error.code === 'commander.unknownCommand') {
+    const word = path[path.length - 1] ?? '';
+    const parent = path.length > 1 ? 'douban book' : 'douban';
+    suggestion = /[\u4e00-\u9fff]/.test(word)
+      ? (path.length > 1 ? `查书请用：douban book info ${word}` : `查电影：douban movie ${word}；查书：douban book info ${word}`)
+      : `运行 ${parent} --help 查看可用命令`;
+  }
+  printCliError(error, { command: 'douban', suggestion });
   process.exitCode = 1;
 }

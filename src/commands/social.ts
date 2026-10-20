@@ -185,9 +185,10 @@ export function registerSocialCommands(program: Command): void {
 
       const auth = await withSpinner('正在检查登录状态...', () => ensureAuth(), !opts.json);
       const me = currentUserProfile(auth);
+      let fetched = 0;
       const result = await withSpinner(
-        `正在读取 ${me.id} 的看过记录...`,
-        () => getCollectionRecords(me.id, 'collect', limit, auth.cookies, { pageDelayMs }),
+        () => `正在读取看过记录... 已读取 ${fetched} 条`,
+        () => getCollectionRecords(me.id, 'collect', limit, auth.cookies, { pageDelayMs, onProgress: (count) => { fetched = count; } }),
         !opts.json
       );
 
@@ -245,9 +246,10 @@ export function registerSocialCommands(program: Command): void {
       const warnings: string[] = [];
       for (let i = 0; i < tasks.length; i += 1) {
         const task = tasks[i];
+        let fetched = 0;
         const result = await withSpinner(
-          task.text,
-          () => getCollectionRecords(me.id, task.status, limit, auth.cookies, { pageDelayMs: delayMs }),
+          () => `${task.text} 已读取 ${fetched} 条`,
+          () => getCollectionRecords(me.id, task.status, limit, auth.cookies, { pageDelayMs: delayMs, onProgress: (count) => { fetched = count; } }),
           true
         );
         bucket.set(task.status, result);

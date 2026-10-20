@@ -129,7 +129,7 @@ const missingArgument = run('search');
 assert.equal(missingArgument.status, 1);
 assert.equal(missingArgument.stdout, '');
 assert.match(missingArgument.stderr, /\[INVALID_ARGUMENT\]/);
-assert.match(missingArgument.stderr, /missing required argument/);
+assert.match(missingArgument.stderr, /缺少参数 <keyword>/);
 
 const missingArgumentJson = run('search', '--json');
 assert.equal(missingArgumentJson.status, 1);

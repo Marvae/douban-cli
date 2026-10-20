@@ -139,7 +139,7 @@ describe('utils/error', () => {
       label: 'extra Cookie header argument',
       argv: ['login', '--cookie-stdin', 'bid=tracking-value; dbcl2=extra-account; ck=extra-csrf', '--json'],
       message: "error: too many arguments for 'login'. Expected 0 arguments but got 1: bid=tracking-value; dbcl2=extra-account; ck=extra-csrf.",
-      expected: 'got 1: [REDACTED].'
+      expected: '收到 1 个：[REDACTED]'
     },
     {
       label: 'separate unsupported Cookie value',

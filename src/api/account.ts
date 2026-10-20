@@ -50,6 +50,7 @@ export interface CollectionRecord {
 
 export interface CollectionRecordLoadOptions {
   pageDelayMs?: number;
+  onProgress?: (fetched: number) => void;
 }
 
 export interface CollectionRecordResult {
@@ -164,7 +165,8 @@ export async function getCollectionRecords(
     status,
     start: 0,
     count: limit,
-    pageDelayMs: options.pageDelayMs
+    pageDelayMs: options.pageDelayMs,
+    onProgress: options.onProgress
   }, cookies);
   const warnings = page.warnings.length > 0
     ? page.warnings
