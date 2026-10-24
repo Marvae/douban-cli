@@ -254,28 +254,35 @@ function registerKindCommands(parent: Command, profile: KindProfile): void {
     ));
   }));
 
-  const rate = group(parent.command(`rate [${subjectArg}]`))
-    .description(`给${noun}评分（1-5），并标记为“${statusLabels.collect}” [需登录]`)
+  const rate = group(parent.command(`rate [${subjectArg}] [comment]`))
+    .description(`给${noun}评分（1-5），并标记为“${statusLabels.collect}”；短评可选 [需登录]`)
     .option('--score <score>', '单条模式评分（1-5）');
-  addWriteOptions(rate, '批量模式：每行 <id>,<score>').action(withErrorHandler({
+  addWriteOptions(rate, '批量模式：每行 <id>,<score>，短评可写在后面').action(withErrorHandler({
     command: `${prefix}rate`,
-    options: '评分范围：1-5',
-    suggestion: `可尝试：douban ${prefix}rate ${example} --score 5`
-  }, async (id: string | undefined, opts) => {
-    rejectMixedInput(opts, Boolean(id || opts.score));
+    options: '评分范围：1-5；短评可选',
+    suggestion: `可尝试：douban ${prefix}rate ${example} --score 5 "值得重看"`
+  }, async (id: string | undefined, comment: string | undefined, opts) => {
+    rejectMixedInput(opts, Boolean(id || comment || opts.score));
     if (!id && !opts.file) throw new CliArgumentError(missing);
     const shared = sharedPatch(opts);
+    const withComment = (patch: RecordPatch, text: string): RecordPatch => {
+      const body = text.trim();
+      return body ? { ...patch, comment: body } : patch;
+    };
     let items: WriteItem[];
     if (opts.file) {
       items = readBatchLines(String(opts.file)).map((line) => {
-        const [target, score] = splitBatchLine(kind, line, '<id>,<score>');
-        return { ...target, patch: { ...shared, status: 'collect', rating: parseScore(score) } };
+        const [target, rest] = splitBatchLine(kind, line, '<id>,<score>');
+        const split = rest.search(/[,\t]/);
+        const score = split < 0 ? rest : rest.slice(0, split);
+        const text = split < 0 ? '' : rest.slice(split + 1);
+        return { ...target, patch: withComment({ ...shared, status: 'collect', rating: parseScore(score) }, text) };
       });
     } else {
       const rating = parseScore(opts.score);
       const target = await singleTarget(kind, id, opts);
       if (!target) return;
-      items = [{ ...target, patch: { ...shared, status: 'collect', rating } }];
+      items = [{ ...target, patch: withComment({ ...shared, status: 'collect', rating }, String(comment ?? '')) }];
     }
     await runWrites(items, opts, profile, (subjectId, itemPatch, cookies, ck) => (
       editSubjectRecord(kind, subjectId, itemPatch, cookies, { dryRun: opts.dryRun, ck })

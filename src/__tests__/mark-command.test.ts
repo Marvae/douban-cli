@@ -63,6 +63,7 @@ describe('mark commands', () => {
   it.each([
     ['mark', '1292052', '--wish', '--file', 'items.txt'],
     ['rate', '1292052', '--score', '5', '--file', 'ratings.txt'],
+    ['rate', '1292052', '值得重看', '--score', '5', '--file', 'ratings.txt'],
     ['comment', '1292052', 'good', '--file', 'comments.txt'],
     ['unmark', '1292052', '--file', 'items.txt'],
     ['book', 'mark', '2567698', '--read', '--file', 'items.txt']
@@ -213,6 +214,30 @@ describe('mark commands', () => {
       expect(String(vi.mocked(console.error).mock.calls[0]?.[0])).toContain('无效电影 ID: 沙丘');
       expect(mocks.ensureAuth).not.toHaveBeenCalled();
       expect(mocks.searchMovies).not.toHaveBeenCalled();
+    });
+
+    it('rates with an optional comment in one write, and keeps the comment off the patch when omitted', async () => {
+      setUp();
+
+      await run(['rate', '1292052', '值得重看', '--score', '5', '--dry-run']);
+      expect(mocks.editSubjectRecord.mock.calls[0]?.[2]).toEqual({
+        status: 'collect', rating: 5, comment: '值得重看'
+      });
+
+      mocks.editSubjectRecord.mockClear();
+      await run(['rate', '1292052', '--score', '5', '--dry-run']);
+      expect(mocks.editSubjectRecord.mock.calls[0]?.[2]).toEqual({ status: 'collect', rating: 5 });
+    });
+
+    it('reads an optional comment from a rate batch file', async () => {
+      setUp();
+
+      await run(['rate', '--file', batchFile('1292052,5,值得重看\n3001114,4\n'), '--dry-run', '--delay', '0']);
+
+      expect(mocks.editSubjectRecord.mock.calls.map(([, id, patch]) => [id, patch])).toEqual([
+        ['1292052', { status: 'collect', rating: 5, comment: '值得重看' }],
+        ['3001114', { status: 'collect', rating: 4 }]
+      ]);
     });
   });
 });

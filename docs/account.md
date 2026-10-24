@@ -46,7 +46,7 @@ douban login --cookie-file /path/to/cookies.txt    # 浏览器扩展导出的 Ne
 ```bash
 douban mark 1292052 --wish                  # 电影：--wish / --watched / --watching
 douban book mark 2567698 --read             # 图书：--wish / --read / --reading
-douban rate 1292052 --score 5
+douban rate 1292052 --score 5 "值得重看"    # 短评可选，一次写入
 douban book comment 2567698 "值得重读" --tags 科幻,经典 --private
 douban book mark 9787544269506 --read      # 图书也可以直接用 ISBN
 douban mark 沙丘 --wish --dry-run           # 按名称：先预览匹配到的条目
@@ -58,7 +58,7 @@ douban review 1292052 "标题" --file review.md  # 长评（仅电影）
 - 按名称修改时，会先显示匹配到的《名称》(ID) 和版本信息，在终端里确认后才写入。同一名称有多个版本或同名影视时会列出评分、年份/出版社，选编号即写入该条，不必再确认一次。脚本和 AI 里请用 ID 或 ISBN。
 - 每次写入都会先读取当前记录，只修改你指定的字段，提交后再读回核对；评分、短评、标签和“仅自己可见”不会被意外清空，也从不勾选“分享到广播”。
 - `--dry-run` 只显示修改前后的对比，不提交。`--tags` 覆盖原有标签；`--private` / `--public` 切换可见性。
-- `rate` 会把条目标为看过/读过；`comment` 保留原状态，未标记时标为看过/读过；`unmark` 会删除整条记录（含评分、短评、标签）。
+- `rate` 会把条目标为看过/读过，短评可选，和评分一次写入；`comment` 只改短评，保留原状态（未标记时标为看过/读过）；`unmark` 会删除整条记录（含评分、短评、标签）。
 - 写入失败不会自动重试；读回结果与预期不一致时会报错并提示用 `record` 核对。
 
 ## 统计与备份
@@ -98,7 +98,7 @@ douban comment --file comments.tsv --delay 1.5
 文件格式：
 
 - `mark` / `unmark`：每行一个 ID；图书也可以是 ISBN。批量文件不接受名称。
-- `rate`：每行 `<id>,<score>`，`score` 为 1–5。
+- `rate`：每行 `<id>,<score>`，`score` 为 1–5；短评可写在后面。
 - `comment`：每行 `<id>,<comment>`，逗号或制表符分隔。
 - 空行和以 `#` 开头的注释会被忽略。
 
