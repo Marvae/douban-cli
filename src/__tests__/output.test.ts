@@ -2,9 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { idColumn, renderTable } from '../ui/output.ts';
 
 const originalIsTTY = process.stdout.isTTY;
+const originalTerm = process.env.TERM;
 
 afterEach(() => {
   process.stdout.isTTY = originalIsTTY;
+  if (originalTerm === undefined) delete process.env.TERM;
+  else process.env.TERM = originalTerm;
   vi.restoreAllMocks();
 });
 
@@ -22,6 +25,7 @@ function printTable(isTTY: boolean): string {
 
 describe('terminal links', () => {
   it('link IDs only in a terminal, keep alignment and never link unsafe URLs', () => {
+    process.env.TERM = 'xterm';
     const plain = printTable(false);
     expect(plain).not.toContain('\u001b');
 
@@ -31,5 +35,10 @@ describe('terminal links', () => {
     // Removing each `ESC ]8;; url BEL` leaves exactly the plain table.
     const stripped = linked.split('\u001b]8;;').map((part, index) => (index === 0 ? part : part.slice(part.indexOf('\u0007') + 1))).join('');
     expect(stripped).toBe(plain);
+  });
+
+  it('does not emit links when TERM is dumb, even if stdout is a TTY', () => {
+    process.env.TERM = 'dumb';
+    expect(printTable(true)).not.toContain('\u001b');
   });
 });
