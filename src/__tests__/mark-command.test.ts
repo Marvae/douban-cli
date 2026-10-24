@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   getSubjectRecord: vi.fn(),
   removeSubjectRecord: vi.fn(),
   resolveBookIdByIsbn: vi.fn(),
+  searchBooks: vi.fn(),
   searchMovies: vi.fn(),
   getSubjectTitle: vi.fn(),
   canPrompt: vi.fn(),
@@ -22,7 +23,8 @@ vi.mock('../auth/index.js', () => ({
 }));
 vi.mock('../api/book.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/book.ts')>()),
-  resolveBookIdByIsbn: mocks.resolveBookIdByIsbn
+  resolveBookIdByIsbn: mocks.resolveBookIdByIsbn,
+  searchBooks: mocks.searchBooks
 }));
 vi.mock('../api/search.js', () => ({ searchMovies: mocks.searchMovies }));
 vi.mock('../api/subject.js', async (importOriginal) => ({
@@ -86,8 +88,8 @@ describe('mark commands', () => {
       writeFileSync(file, contents);
       return file;
     };
-    const run = async (...args: string[]) => {
-      process.argv = ['node', 'douban', ...args, '--json'];
+    const run = async (args: string[], json = true) => {
+      process.argv = ['node', 'douban', ...args, ...(json ? ['--json'] : [])];
       await createProgram().parseAsync(process.argv);
     };
 
@@ -109,8 +111,8 @@ describe('mark commands', () => {
       setUp();
       mocks.resolveBookIdByIsbn.mockResolvedValue('34800934');
 
-      await run('book', 'mark', '978-7-5442-6950-6', '--read', '--dry-run');
-      await run('book', 'mark', '--file', batchFile('9787544269506\n2567698\n'), '--read', '--dry-run', '--delay', '0');
+      await run(['book', 'mark', '978-7-5442-6950-6', '--read', '--dry-run']);
+      await run(['book', 'mark', '--file', batchFile('9787544269506\n2567698\n'), '--read', '--dry-run', '--delay', '0']);
 
       expect(mocks.resolveBookIdByIsbn.mock.calls.map(([isbn]) => isbn)).toEqual(['9787544269506', '9787544269506']);
       expect(mocks.editSubjectRecord.mock.calls.map(([kind, id]) => [kind, id]))
@@ -122,27 +124,90 @@ describe('mark commands', () => {
       mocks.searchMovies.mockResolvedValue([{ id: '3001114', title: '沙丘' }]);
 
       mocks.canPrompt.mockReturnValue(false);
-      await run('mark', '沙丘', '--wish');
+      await run(['mark', '沙丘', '--wish']);
       expect(process.exitCode).toBe(1);
       expect(String(vi.mocked(console.error).mock.calls[0]?.[0])).toContain('请改用 ID');
       expect(mocks.editSubjectRecord).not.toHaveBeenCalled();
 
       process.exitCode = undefined;
-      await run('mark', '沙丘', '--wish', '--dry-run');
+      await run(['mark', '沙丘', '--wish', '--dry-run']);
       expect(mocks.editSubjectRecord).toHaveBeenCalledWith('movie', '3001114', expect.anything(), 'dbcl2=x', expect.objectContaining({ dryRun: true }));
 
       mocks.editSubjectRecord.mockClear();
       mocks.canPrompt.mockReturnValue(true);
       mocks.ask.mockResolvedValue('n');
-      await run('mark', '沙丘', '--wish');
+      await run(['mark', '沙丘', '--wish']);
       expect(mocks.ask).toHaveBeenCalledWith(expect.stringContaining('《沙丘》(3001114)'));
       expect(mocks.editSubjectRecord).not.toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
     });
 
+    it('lists book editions on stderr for JSON and does not write the first hit when declined', async () => {
+      setUp();
+      mocks.searchBooks.mockResolvedValue([
+        {
+          id: '2567698',
+          title: '三体',
+          rating: '8.8',
+          rating_count: 500000,
+          meta: '刘慈欣 / 重庆出版社 / 2008',
+          url: 'https://book.douban.com/subject/2567698/'
+        },
+        {
+          id: '6414884',
+          title: '三体',
+          rating: '9.1',
+          rating_count: 1000,
+          meta: '刘慈欣 / 重庆出版社 / 2016',
+          url: 'https://book.douban.com/subject/6414884/'
+        }
+      ]);
+      mocks.canPrompt.mockReturnValue(true);
+      mocks.ask.mockResolvedValue('n');
+
+      await run(['book', 'mark', '三体', '--read']);
+
+      expect(String(vi.mocked(console.error).mock.calls.flat().join('\n'))).toContain('有 2 个版本，当前 2567698');
+      expect(mocks.ask).toHaveBeenCalledWith(expect.stringContaining('《三体》(2567698) 8.8 · 刘慈欣 / 重庆出版社 / 2008'));
+      expect(mocks.editSubjectRecord).not.toHaveBeenCalled();
+    });
+
+    it('writes the picked book edition without a second confirmation', async () => {
+      setUp();
+      mocks.searchBooks.mockResolvedValue([
+        {
+          id: '2567698',
+          title: '三体',
+          rating: '8.8',
+          rating_count: 500000,
+          meta: '刘慈欣 / 重庆出版社 / 2008',
+          url: 'https://book.douban.com/subject/2567698/'
+        },
+        {
+          id: '6414884',
+          title: '三体',
+          rating: '9.1',
+          rating_count: 1000,
+          meta: '刘慈欣 / 重庆出版社 / 2016',
+          url: 'https://book.douban.com/subject/6414884/'
+        }
+      ]);
+      mocks.canPrompt.mockReturnValue(true);
+      mocks.ask.mockResolvedValue('2');
+      mocks.editSubjectRecord.mockImplementation(async (_kind: string, id: string) => (
+        { before: record(id, 'none'), after: record(id, 'collect'), changed: true, dryRun: false }
+      ));
+
+      await run(['book', 'mark', '三体', '--read'], false);
+
+      expect(mocks.ask).toHaveBeenCalledTimes(1);
+      expect(mocks.ask).toHaveBeenCalledWith('编号，回车用 1，q 取消：');
+      expect(mocks.editSubjectRecord.mock.calls.map(([, id]) => id)).toEqual(['6414884']);
+    });
+
     it('rejects titles in batch files before any request', async () => {
       setUp();
-      await run('mark', '--file', batchFile('1292052\n沙丘\n'), '--wish');
+      await run(['mark', '--file', batchFile('1292052\n沙丘\n'), '--wish']);
 
       expect(process.exitCode).toBe(1);
       expect(String(vi.mocked(console.error).mock.calls[0]?.[0])).toContain('无效电影 ID: 沙丘');

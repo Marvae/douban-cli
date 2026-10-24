@@ -13,6 +13,7 @@ export interface SearchItem {
   id: string;
   title: string;
   rating: string;
+  rating_count: number;
   year?: string;
   /** `tv` for series. */
   type?: 'movie' | 'tv';
@@ -123,6 +124,7 @@ export async function searchMovies(
     id: item.id,
     title: item.title,
     rating: item.rating,
+    rating_count: item.rating_count,
     year: item.year,
     type: item.type === 'tv' ? 'tv' : 'movie',
     url: item.url,

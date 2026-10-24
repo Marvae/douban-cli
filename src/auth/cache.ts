@@ -1,4 +1,7 @@
-// The encrypted local session cache.
+// The encrypted local session cache. AES-256-GCM; the key is derived from the
+// current username, hostname and home directory so a copied file is not
+// plaintext. That is not a password: anyone with the file and those machine
+// values can decrypt it.
 import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { chmodSync, lstatSync, readFileSync, unlinkSync } from 'node:fs';
 import os from 'node:os';

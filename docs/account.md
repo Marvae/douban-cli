@@ -55,7 +55,7 @@ douban book unmark 2567698 --dry-run        # 先预览，确认后去掉 --dry-
 douban review 1292052 "标题" --file review.md  # 长评（仅电影）
 ```
 
-- 按名称修改时，会先显示匹配到的《名称》(ID)，在终端里确认后才写入；脚本和 AI 里请用 ID 或 ISBN。
+- 按名称修改时，会先显示匹配到的《名称》(ID) 和版本信息，在终端里确认后才写入。同一名称有多个版本或同名影视时会列出评分、年份/出版社，选编号即写入该条，不必再确认一次。脚本和 AI 里请用 ID 或 ISBN。
 - 每次写入都会先读取当前记录，只修改你指定的字段，提交后再读回核对；评分、短评、标签和“仅自己可见”不会被意外清空，也从不勾选“分享到广播”。
 - `--dry-run` 只显示修改前后的对比，不提交。`--tags` 覆盖原有标签；`--private` / `--public` 切换可见性。
 - `rate` 会把条目标为看过/读过；`comment` 保留原状态，未标记时标为看过/读过；`unmark` 会删除整条记录（含评分、短评、标签）。
@@ -108,7 +108,7 @@ douban comment --file comments.tsv --delay 1.5
 
 - 公开只读命令不会隐式读取浏览器 Cookie。浏览器登录只在显式运行 `douban login` 时发生；手动导入只在显式传入 `--cookie-stdin` 或 `--cookie-file` 时发生，浏览器失败不会自动切换来源。
 - CLI 不接受包含 Cookie 内容的命令行参数或环境变量，也不会自行读取剪贴板。Netscape `cookies.txt` 属于敏感登录凭据，不要提交到 Git、上传到公开服务或长期保留。
-- 登录缓存使用 AES-256-GCM 加密、文件权限 `0600`，应用目录权限为 `0700`，并按缓存内的 `updatedAt` 在 30 天后失效；`douban logout` 会删除本地缓存，不会退出浏览器中的豆瓣账号。
+- 登录缓存使用 AES-256-GCM 加密、文件权限 `0600`，应用目录权限为 `0700`，并按缓存内的 `updatedAt` 在 30 天后失效。密钥由当前用户名、主机名和家目录推导，避免缓存文件被直接读出 Cookie；能同时拿到该文件和这些本机信息的人可以解密。这不是登录口令，也不能防止本机上以你身份运行的程序读取。`douban logout` 会删除本地缓存，不会退出浏览器中的豆瓣账号。
 - macOS 将登录缓存和配置保存在 `~/Library/Application Support/douban-cli/`；Linux 分别使用 `$XDG_STATE_HOME/douban-cli/` 和 `$XDG_CONFIG_HOME/douban-cli/`（未设置时使用标准默认目录）；Windows 分别使用 `%LOCALAPPDATA%\douban-cli\` 和 `%APPDATA%\douban-cli\`。
 - 可将 `DOUBAN_CLI_HOME` 设为绝对路径，让登录缓存和配置统一存放到指定目录。旧的 `~/.douban-cli-auth.json` 与 `~/.douban-cli.json` 会在验证迁移结果后自动删除。
 - 多浏览器登录不同账号时，请使用 `--browser` 和 `--profile` 明确选择，避免操作错误账号。

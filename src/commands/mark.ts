@@ -15,7 +15,7 @@ import { getSubjectTitle } from '../api/subject.js';
 import { ask, canPrompt } from '../ui/prompt.js';
 import { withSpinner } from '../ui/spinner.js';
 import { CliArgumentError, withErrorHandler } from '../utils/error.js';
-import { parseSubjectRef, resolveSubject } from './resolve.js';
+import { formatResolvedLabel, parseSubjectRef, resolveSubject } from './resolve.js';
 import { parseDelaySeconds, sleep } from '../utils/timing.js';
 import { formatStars, STATUS_LABELS, subjectLabel } from '../ui/output.js';
 
@@ -82,14 +82,15 @@ interface WriteOptions {
 
 /**
  * The subject of a single write: an ID, an ISBN for books or a title. A title
- * found by search is written only after the user confirms it in a terminal; a
- * dry run just previews it. Returns null when the user declines.
+ * found by search is written only after the user confirms it in a terminal
+ * (or picks a book edition from a list); a dry run just previews it. Returns
+ * null when the user declines.
  */
 async function singleTarget(kind: SubjectActionKind, input: string | undefined, opts: WriteOptions): Promise<WriteTarget | null> {
-  const target = await resolveSubject(kind, input ?? '', true);
-  if (!target.searched || opts.dryRun) return { ref: { id: target.id }, title: target.title };
-  const label = subjectLabel(target.id, target.title);
-  if (!canPrompt()) throw new CliArgumentError(`按名称修改需要在终端里确认；请改用 ID：${label}`);
+  const target = await resolveSubject(kind, input ?? '', Boolean(opts.json), { prompt: !opts.dryRun });
+  if (!target.searched || opts.dryRun || target.picked) return { ref: { id: target.id }, title: target.title };
+  const label = formatResolvedLabel(target);
+  if (!canPrompt()) throw new CliArgumentError(`按名称修改需要在终端里确认；请改用 ID${kind === 'book' ? ' 或 ISBN' : ''}：${label}`);
   if (!/^y/i.test(await ask(`将修改 ${label}，确认吗？[y/N] `))) {
     console.log('已取消');
     return null;
