@@ -13,6 +13,7 @@ type CommanderErrorLike = Error & {
 };
 
 export type CliErrorCode =
+  | 'AMBIGUOUS'
   | 'AUTH_REQUIRED'
   | 'COMMAND_FAILED'
   | 'HTTP_ERROR'
@@ -22,6 +23,13 @@ export type CliErrorCode =
   | 'RATE_LIMITED'
   | 'UNKNOWN_COMMAND';
 
+export type SubjectMatch = {
+  id: string;
+  title: string;
+  rating?: string;
+  meta?: string;
+};
+
 export type CliErrorPayload = {
   ok: false;
   error: {
@@ -30,6 +38,7 @@ export type CliErrorPayload = {
     command: string;
     target?: string;
     suggestion?: string;
+    matches?: SubjectMatch[];
   };
 };
 
@@ -39,6 +48,18 @@ export class CliArgumentError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'CliArgumentError';
+  }
+}
+
+/** Title search hit more than one edition or work; the caller must pick an ID. */
+export class AmbiguousMatchError extends Error {
+  readonly code = 'AMBIGUOUS';
+  readonly matches: SubjectMatch[];
+
+  constructor(message: string, matches: SubjectMatch[]) {
+    super(message);
+    this.name = 'AmbiguousMatchError';
+    this.matches = matches;
   }
 }
 
@@ -126,6 +147,7 @@ function structuredErrorCode(error: unknown): CliErrorCode | undefined {
 
     if (structuredCode === 'NETWORK') return 'NETWORK_ERROR';
     if (structuredCode === 'INVALID_ARGUMENT') return 'INVALID_ARGUMENT';
+    if (structuredCode === 'AMBIGUOUS') return 'AMBIGUOUS';
     if (structuredCode === 'AUTH_REQUIRED') return 'AUTH_REQUIRED';
     if (structuredCode === 'HTTP_STATUS') {
       if (structuredStatus === 401) return 'AUTH_REQUIRED';
@@ -213,6 +235,9 @@ function suggestRecovery(error: unknown, code: CliErrorCode, ctx: CommandErrorCo
   }
   if (code === 'AUTH_REQUIRED') return '运行 douban login，复用浏览器里已登录的豆瓣';
   if (code === 'NETWORK_ERROR') return '检查网络连接后重试';
+  if (code === 'AMBIGUOUS' && error instanceof AmbiguousMatchError && error.matches[0]) {
+    return `改用 ID 再查：${error.matches[0].id}`;
+  }
   return ctx.suggestion;
 }
 
@@ -222,6 +247,7 @@ function createErrorPayload(error: unknown, ctx: CommandErrorContext): CliErrorP
   const target = ctx.target ? redactSensitiveArguments(ctx.target) : undefined;
   const recovery = suggestRecovery(error, code, ctx);
   const suggestion = recovery ? redactSensitiveArguments(recovery) : undefined;
+  const matches = error instanceof AmbiguousMatchError ? error.matches : undefined;
   return {
     ok: false,
     error: {
@@ -229,7 +255,8 @@ function createErrorPayload(error: unknown, ctx: CommandErrorContext): CliErrorP
       message: redactSensitiveArguments(rawMessage),
       command: ctx.command,
       ...(target ? { target } : {}),
-      ...(suggestion ? { suggestion } : {})
+      ...(suggestion ? { suggestion } : {}),
+      ...(matches && matches.length > 0 ? { matches } : {})
     }
   };
 }
@@ -241,8 +268,14 @@ function printCliError(error: unknown, ctx: CommandErrorContext): void {
     return;
   }
 
-  const { code, message, target, suggestion } = payload.error;
+  const { code, message, target, suggestion, matches } = payload.error;
   console.error(`❌ [${code}] ${message}${target ? ` (${target})` : ''}`);
+  if (matches) {
+    matches.forEach((match, index) => {
+      const extras = [match.rating, match.meta].filter(Boolean).join(' · ');
+      console.error(`   ${index + 1}  《${match.title}》(${match.id})${extras ? ` ${extras}` : ''}`);
+    });
+  }
   if (ctx.options && code === 'INVALID_ARGUMENT') {
     console.error(`   可选项：${redactSensitiveArguments(ctx.options)}`);
   }

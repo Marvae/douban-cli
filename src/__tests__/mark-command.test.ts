@@ -143,7 +143,7 @@ describe('mark commands', () => {
       expect(process.exitCode).toBeUndefined();
     });
 
-    it('lists book editions on stderr for JSON and does not write the first hit when declined', async () => {
+    it('returns AMBIGUOUS with every edition instead of writing the first hit', async () => {
       setUp();
       mocks.searchBooks.mockResolvedValue([
         {
@@ -163,13 +163,18 @@ describe('mark commands', () => {
           url: 'https://book.douban.com/subject/6414884/'
         }
       ]);
-      mocks.canPrompt.mockReturnValue(true);
-      mocks.ask.mockResolvedValue('n');
+      mocks.canPrompt.mockReturnValue(false);
 
       await run(['book', 'mark', '三体', '--read']);
 
-      expect(String(vi.mocked(console.error).mock.calls.flat().join('\n'))).toContain('有 2 个版本，当前 2567698');
-      expect(mocks.ask).toHaveBeenCalledWith(expect.stringContaining('《三体》(2567698) 8.8 · 刘慈欣 / 重庆出版社 / 2008'));
+      expect(process.exitCode).toBe(1);
+      const payload = JSON.parse(String(vi.mocked(console.error).mock.calls[0]?.[0]));
+      expect(payload.error).toMatchObject({
+        code: 'AMBIGUOUS',
+        message: expect.stringContaining('有 2 个版本')
+      });
+      expect(payload.error.matches.map((match: { id: string }) => match.id)).toEqual(['2567698', '6414884']);
+      expect(mocks.ask).not.toHaveBeenCalled();
       expect(mocks.editSubjectRecord).not.toHaveBeenCalled();
     });
 

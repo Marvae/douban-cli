@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CliArgumentError, handleProgramError, withErrorHandler } from '../utils/error.ts';
+import { AmbiguousMatchError, CliArgumentError, handleProgramError, withErrorHandler } from '../utils/error.ts';
 
 const originalArgv = process.argv;
 
@@ -198,5 +198,32 @@ describe('utils/error', () => {
     expect(payload.error.target).toBe('[REDACTED]');
     expect(payload.error.suggestion).toBe('重试 [REDACTED]');
     expect(output).not.toMatch(/context-tracking|context-account|context-csrf/);
+  });
+
+  it('includes structured matches for an ambiguous title', async () => {
+    process.argv = ['node', 'douban', 'book', 'info', '三体', '--json'];
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const action = withErrorHandler({ command: 'book info' }, async () => {
+      throw new AmbiguousMatchError('《三体》有 2 个版本，请指定其中一个', [
+        { id: '2567698', title: '三体', rating: '8.8', meta: '重庆出版社 / 2008' },
+        { id: '6414884', title: '三体', rating: '9.1' }
+      ]);
+    });
+
+    await action();
+
+    expect(JSON.parse(String(stderr.mock.calls[0]?.[0]))).toEqual({
+      ok: false,
+      error: {
+        code: 'AMBIGUOUS',
+        message: '《三体》有 2 个版本，请指定其中一个',
+        command: 'book info',
+        suggestion: '改用 ID 再查：2567698',
+        matches: [
+          { id: '2567698', title: '三体', rating: '8.8', meta: '重庆出版社 / 2008' },
+          { id: '6414884', title: '三体', rating: '9.1' }
+        ]
+      }
+    });
   });
 });

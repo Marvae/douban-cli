@@ -29,7 +29,7 @@ description: Query Douban (豆瓣) movies, TV shows, books, doulists and user co
 
 Movie and book details include `recommendations` (similar titles); prefer them over extra searches when suggesting what to watch or read next.
 
-When books come from another source (another skill, a file, a photo of a cover), pass their ISBN: `book info`, `book mark` and the other book commands, including `--file` lines, resolve an ISBN exactly without searching. The same title often has several book editions, or several films and series (remakes, 电影 vs 剧集). Never mark by title: a `⚠️` line that lists versions means `--json` used the first — show those versions and write only with the ISBN or ID the user chooses. In a terminal the CLI lists matches and asks for a number.
+When books come from another source (another skill, a file, a photo of a cover), pass their ISBN: `book info`, `book mark` and the other book commands, including `--file` lines, resolve an ISBN exactly without searching. The same title often has several book editions, or several films and series (remakes, 电影 vs 剧集). Never mark by title. `--json` returns `AMBIGUOUS` with `error.matches` when a name hits several works — show those versions and continue only with the ISBN or ID the user chooses. In a terminal the CLI lists matches and asks for a number.
 
 ## Rules
 

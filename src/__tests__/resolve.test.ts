@@ -24,7 +24,7 @@ vi.mock('../ui/prompt.js', () => ({
 }));
 
 import { formatResolvedLabel, resolveSubject } from '../commands/resolve.ts';
-import { CliArgumentError } from '../utils/error.ts';
+import { AmbiguousMatchError, CliArgumentError } from '../utils/error.ts';
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -92,24 +92,20 @@ describe('resolveSubject', () => {
     expect(mocks.searchBooks).not.toHaveBeenCalled();
   });
 
-  it('lists same-title editions and uses the first when it cannot prompt', async () => {
+  it('refuses to pick a same-title edition when it cannot prompt', async () => {
     mocks.getOptionalSessionCookies.mockResolvedValue(undefined);
     mocks.searchBooks.mockResolvedValue(threeBody);
     mocks.canPrompt.mockReturnValue(false);
-    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
-    await expect(resolveSubject('book', '三体', false)).resolves.toEqual({
-      id: '2567698',
-      title: '三体',
-      searched: true,
-      rating: '8.8',
-      meta: '刘慈欣 / 重庆出版社 / 2008'
+    await expect(resolveSubject('book', '三体', false)).rejects.toBeInstanceOf(AmbiguousMatchError);
+    await expect(resolveSubject('book', '三体', true)).rejects.toMatchObject({
+      code: 'AMBIGUOUS',
+      message: expect.stringContaining('有 2 个版本'),
+      matches: [
+        expect.objectContaining({ id: '2567698', rating: '8.8' }),
+        expect.objectContaining({ id: '6414884', rating: '9.1', meta: '刘慈欣 / 重庆出版社 / 2016' })
+      ]
     });
-    const output = log.mock.calls.map(([line]) => String(line)).join('\n');
-    expect(output).toContain('有 2 个版本，使用 2567698');
-    expect(output).toContain('2567698');
-    expect(output).toContain('6414884');
-    expect(output).toContain('刘慈欣 / 重庆出版社 / 2016');
     expect(mocks.ask).not.toHaveBeenCalled();
   });
 
@@ -145,17 +141,19 @@ describe('resolveSubject', () => {
     await expect(resolveSubject('book', '三体', false)).rejects.toThrow('已取消');
   });
 
-  it('puts every edition on stderr for JSON instead of prompting', async () => {
+  it('still prompts in a terminal even when stdout is JSON', async () => {
     mocks.getOptionalSessionCookies.mockResolvedValue(undefined);
     mocks.searchBooks.mockResolvedValue(threeBody);
     mocks.canPrompt.mockReturnValue(true);
-    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mocks.ask.mockResolvedValue('2');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
-    await expect(resolveSubject('book', '三体', true)).resolves.toMatchObject({ id: '2567698', searched: true });
-    const warning = String(error.mock.calls.flat().join('\n'));
-    expect(warning).toContain('有 2 个版本，当前 2567698');
-    expect(warning).toContain('6414884 9.1 刘慈欣 / 重庆出版社 / 2016');
-    expect(mocks.ask).not.toHaveBeenCalled();
+    await expect(resolveSubject('book', '三体', true)).resolves.toMatchObject({
+      id: '6414884',
+      picked: true
+    });
+    expect(mocks.ask).toHaveBeenCalledWith('编号，回车用 1，q 取消：');
   });
 
   it('lists search hits when the title does not match exactly', async () => {
@@ -191,7 +189,7 @@ describe('resolveSubject', () => {
     expect(String(log.mock.calls[0]?.[0])).toContain('《沙丘》(3001114)');
   });
 
-  it('lists same-title movies and series instead of taking the first hit', async () => {
+  it('refuses same-title movies and series instead of taking the first hit', async () => {
     mocks.getOptionalSessionCookies.mockResolvedValue(undefined);
     mocks.searchMovies.mockResolvedValue([
       movie({ id: '1', title: '醉梦', type: 'tv', year: '2026', rating: '7.9', meta: '陈凯歌' }),
@@ -199,14 +197,15 @@ describe('resolveSubject', () => {
       movie({ id: '3', title: '醉梦人', year: '2020' })
     ]);
     mocks.canPrompt.mockReturnValue(false);
-    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
-    await expect(resolveSubject('movie', '醉梦', false)).resolves.toMatchObject({ id: '1', title: '醉梦' });
-    const output = log.mock.calls.map(([line]) => String(line)).join('\n');
-    expect(output).toContain('有 2 部同名作品，使用 1');
-    expect(output).toContain('剧集');
-    expect(output).toContain('电影');
-    expect(output).not.toContain('醉梦人');
+    await expect(resolveSubject('movie', '醉梦', true)).rejects.toMatchObject({
+      code: 'AMBIGUOUS',
+      message: expect.stringContaining('有 2 部同名作品'),
+      matches: [
+        expect.objectContaining({ id: '1', meta: expect.stringContaining('剧集') }),
+        expect.objectContaining({ id: '2', meta: expect.stringContaining('电影') })
+      ]
+    });
     expect(mocks.ask).not.toHaveBeenCalled();
   });
 

@@ -11,7 +11,8 @@ douban user USER_ID --wish --json
 douban whoami --json
 ```
 
-- `--json` 将命令结果写到 stdout；失败时向 stderr 写结构化 JSON，并返回非零退出码。错误码包括 `INVALID_ARGUMENT`、`NOT_FOUND`、`AUTH_REQUIRED`、`RATE_LIMITED`、`HTTP_ERROR`、`NETWORK_ERROR` 等。
+- `--json` 将命令结果写到 stdout；失败时向 stderr 写结构化 JSON，并返回非零退出码。错误码包括 `INVALID_ARGUMENT`、`NOT_FOUND`、`AMBIGUOUS`、`AUTH_REQUIRED`、`RATE_LIMITED`、`HTTP_ERROR`、`NETWORK_ERROR` 等。
+- `AMBIGUOUS`：按名称匹配到多个版本或同名作品。`error.matches` 列出候选项，请改用其中的 ID 或 ISBN 再查；不会自动使用第一条。
 - 结果可能不完整时，提示写到 stderr（以 `⚠️` 开头），stdout 的 JSON 保持可解析。
 - `export --format json` 与 `book export --format json` 是文件格式选项，不会把 JSON 打到 stdout。
 - 需要稳定脚本行为时，以具体命令的 `--help` 和 JSON 字段为准，不要解析人类可读表格。

@@ -4,7 +4,7 @@ import type { SubjectKind } from '../api/subject.js';
 import { getOptionalSessionCookies } from '../auth/index.js';
 import { ask, canPrompt } from '../ui/prompt.js';
 import { compactNumber, subjectLabel } from '../ui/output.js';
-import { CliArgumentError, printWarnings } from '../utils/error.js';
+import { AmbiguousMatchError, CliArgumentError, printWarnings } from '../utils/error.js';
 import { isNumericId } from '../utils/parsing.js';
 
 export interface ResolvedSubject {
@@ -160,6 +160,15 @@ export function parseSubjectRef(kind: SubjectKind, value: string): { id?: string
   throw new CliArgumentError(`无效${NOUN[kind]} ID${kind === 'book' ? ' 或 ISBN' : ''}: ${value}`);
 }
 
+function toMatch(item: ResolveCandidate): { id: string; title: string; rating?: string; meta?: string } {
+  return {
+    id: item.id,
+    title: item.title,
+    ...(extraField(item.rating) ? { rating: extraField(item.rating) } : {}),
+    ...(extraField(item.meta) ? { meta: extraField(item.meta) } : {})
+  };
+}
+
 async function pickResolved(
   kind: SubjectKind,
   query: string,
@@ -170,7 +179,7 @@ async function pickResolved(
   const { choices, sameTitle } = matchingChoices(kind, query, candidates);
   if (choices.length === 0) throw new Error(`未找到${NOUN[kind]}：${query}`);
 
-  const shouldPrompt = options.prompt !== false && !quiet && canPrompt() && choices.length > 1;
+  const shouldPrompt = options.prompt !== false && canPrompt() && choices.length > 1;
   let index = 0;
   let picked = false;
 
@@ -186,20 +195,21 @@ async function pickResolved(
     if (selected === null) throw new CliArgumentError('已取消');
     index = selected;
     picked = true;
-  } else if (!quiet && (choices.length > 1 || !sameTitle)) {
-    const header = sameTitle
-      ? `🔎 《${choices[0].title}》有 ${sameTitleNoun(kind, choices.length)}，使用 ${choices[0].id}：`
-      : `🔎 未找到与“${query}”完全同名的${NOUN[kind]}，已匹配搜索第一条：`;
-    console.log(`\n${header}`);
-    choices.forEach((item, choiceIndex) => {
-      console.log(`  ${choiceIndex + 1}  ${formatChoice(item, !sameTitle)}`);
-    });
-  } else if (quiet && (choices.length > 1 || !sameTitle)) {
-    printWarnings([formatChoiceWarning(kind, query, choices, sameTitle, choices[0])]);
+  } else if (choices.length > 1) {
+    const message = sameTitle
+      ? `《${choices[0].title}》有 ${sameTitleNoun(kind, choices.length)}，请指定其中一个`
+      : `未找到与“${query}”完全同名的${NOUN[kind]}，请从搜索结果中指定`;
+    throw new AmbiguousMatchError(message, choices.map(toMatch));
+  } else if (!sameTitle) {
+    if (quiet) printWarnings([formatChoiceWarning(kind, query, choices, false, choices[0])]);
+    else {
+      console.log(`\n🔎 未找到与“${query}”完全同名的${NOUN[kind]}，已匹配搜索第一条：`);
+      console.log(`  1  ${formatChoice(choices[0], true)}`);
+    }
   }
 
   const resolved = toResolved(choices[index], picked);
-  if (!quiet && (picked || (choices.length === 1 && sameTitle))) {
+  if (!quiet && (picked || sameTitle)) {
     console.log(`\n🔎 已匹配为 ${formatResolvedLabel(resolved)}`);
   }
   return resolved;
