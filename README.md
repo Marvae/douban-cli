@@ -24,7 +24,7 @@ $ npx @marvae24/douban-cli now
 
 - 💾 **备份你的豆瓣**：一条命令导出看过、想看、在看和读过、想读、在读，连同评分、短评和“仅自己可见”的条目，存成 JSON、CSV 或 Markdown。
 - 🤖 **交给 AI**：装上 Skill，直接说“今晚看什么”“用 ISBN 把这本书标成读过，评 5 星”。改动账号前会先给你看预览；同一书名有多个版本时按 ISBN 核对。
-- 🔎 **想查就查**：片名、书名、ISBN 直接查评分、短评、书评和相似推荐；Top250、正在热映、口碑榜、豆列都能看，不用登录。
+- 🔎 **想查就查**：片名、书名、ISBN 直接查评分、短评、书评、相似推荐和播放平台；实时热门、Top250、正在热映、电影/剧集/综艺口碑榜、豆列都能看，不用登录。
 - 🛡️ **改得放心**：只改你指定的内容，原有评分、标签和可见性都会保留，不发广播，改完读回核对。
 - 🪶 **不用安装**：有 Node.js 就能用 `npx` 直接运行。只有 2 个依赖，不需要申请 API key。
 
@@ -35,6 +35,7 @@ $ npx @marvae24/douban-cli now
 | 备份豆瓣观影、读书记录 | `douban export -o movies.md`，`douban book export -o books.csv` |
 | 把微信读书读完的书同步到豆瓣 | 同时装上微信读书官方 Skill，对 AI 说“把我今年在微信读书读完的书标到豆瓣”；按 ISBN 精确匹配，先预览再提交 |
 | 找下一部想看的 | 对 AI 说“推荐几部像《沙丘》的电影”，或 `douban movie 沙丘` 看相似推荐 |
+| 最近追什么剧 | `douban trending --tv` 看实时热度，`douban weekly --tv` 看口碑；`douban movie <剧名>` 看在哪个平台播 |
 | 查评分和榜单 | `douban trending`（实时热门）、`douban top250`、`douban now`、`douban weekly`、`douban book info <ISBN>` |
 
 ## 在 AI agent 里使用
