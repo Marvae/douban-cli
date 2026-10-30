@@ -34,12 +34,21 @@ interface RankItem {
   cover: string;
 }
 
+/** A platform that streams the title, as Douban lists it. */
+export interface MovieVendor {
+  name: string;
+  /** Such as 免费, VIP免费观看 or 单片付费; empty when Douban does not say. */
+  payment: string;
+}
+
 export interface MovieDetail {
   id: string;
   title: string;
   year: string;
   original_title: string;
   rating: string;
+  /** Why there is no rating, such as 暂无评分 or 尚未上映; empty when rated. */
+  rating_note: string;
   directors: string[];
   actors: string[];
   genres: string[];
@@ -54,6 +63,10 @@ export interface MovieDetail {
   url: string;
   /** "喜欢这部电影的人也喜欢"; empty when no source provides it. */
   recommendations: SubjectRecommendation[];
+  /** Where to watch; empty when Douban lists none, which does not mean nowhere. */
+  vendors: MovieVendor[];
+  /** Douban's note on the platforms, such as 独播. */
+  vendor_note?: string;
   type?: 'movie' | 'tv';
   episodes_count?: number;
   episodes_info?: string;
@@ -76,6 +89,10 @@ interface MobileMovieResponse {
   original_title?: string;
   intro?: string;
   rating?: { value?: number };
+  null_rating_reason?: unknown;
+  vendors?: unknown;
+  linewatches?: unknown;
+  vendor_desc?: unknown;
   directors?: Array<{ name?: string }>;
   actors?: Array<{ name?: string }>;
   genres?: string[];
@@ -98,14 +115,6 @@ export interface ComingItem {
   types: string[];
   regions: string[];
   wish_count: number;
-  url: string;
-}
-
-export interface WeeklyItem {
-  rank: number;
-  id: string;
-  title: string;
-  trend: string;
   url: string;
 }
 
@@ -157,6 +166,28 @@ function positiveInt(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : undefined;
 }
 
+/** Platforms from `vendors`, or from `linewatches` when that is all there is. Ads are skipped. */
+export function parseMovieVendors(vendors: unknown, linewatches: unknown): MovieVendor[] {
+  const result: MovieVendor[] = [];
+  const add = (name: unknown, payment: string) => {
+    const text = typeof name === 'string' ? cleanText(name) : '';
+    if (text && !result.some((vendor) => vendor.name === text)) result.push({ name: text, payment });
+  };
+  if (Array.isArray(vendors)) {
+    for (const vendor of vendors) {
+      if (!isRecord(vendor) || vendor.is_ad === true) continue;
+      const described = typeof vendor.payment_desc === 'string' ? cleanText(vendor.payment_desc) : '';
+      add(vendor.title, described || (vendor.is_paid === false ? '免费' : ''));
+    }
+  }
+  if (result.length === 0 && Array.isArray(linewatches)) {
+    for (const watch of linewatches) {
+      if (isRecord(watch) && isRecord(watch.source)) add(watch.source.name, watch.free === true ? '免费' : '');
+    }
+  }
+  return result;
+}
+
 /** Movie or series detail from the mobile API; series take their episode count from the TV endpoint. */
 export async function getMovieDetail(id: string): Promise<MovieDetail> {
   const movieId = id.trim();
@@ -180,6 +211,9 @@ export async function getMovieDetail(id: string): Promise<MovieDetail> {
     original_title: normalizeTitle(data.original_title ?? ''),
     // Douban reports unrated titles as 0.
     rating: typeof rating === 'number' && rating > 0 ? rating.toFixed(1) : '-',
+    rating_note: !(typeof rating === 'number' && rating > 0) && typeof data.null_rating_reason === 'string'
+      ? cleanText(data.null_rating_reason)
+      : '',
     directors: personNames(data.directors),
     actors: personNames(data.actors),
     genres: normalizeArrayField(data.genres),
@@ -193,6 +227,8 @@ export async function getMovieDetail(id: string): Promise<MovieDetail> {
     summary: cleanText(data.intro ?? ''),
     url: `${BASE}/subject/${movieId}/`,
     recommendations,
+    vendors: parseMovieVendors(data.vendors, data.linewatches),
+    ...(typeof data.vendor_desc === 'string' && cleanText(data.vendor_desc) ? { vendor_note: cleanText(data.vendor_desc) } : {}),
     episodes_count: positiveInt(data.episodes_count),
     episodes_info: cleanText(data.episodes_info ?? '') || undefined
   };
@@ -373,41 +409,6 @@ export async function getNowShowing(limit = 20): Promise<NowShowingItem[]> {
   return items.map(({ id, title, rating, release_date, meta, url, cover }) => (
     { id, title, rating, release_date: release_date ?? '-', meta, url, cover }
   ));
-}
-
-/**
- * Get weekly reputation chart from https://movie.douban.com/chart
- */
-export async function getWeekly(limit = 10): Promise<WeeklyItem[]> {
-  if (!Number.isInteger(limit) || limit <= 0) return [];
-  const html = await fetchHtml(`${BASE}/chart`, { Referer: BASE });
-
-  const sectionMatch = html.match(/<h2>一周口碑榜[\s\S]*?<ul class="content" id="listCont2">([\s\S]*?)<\/ul>/);
-  if (!sectionMatch) throw new Error('未找到一周口碑榜数据区域');
-
-  const results: WeeklyItem[] = [];
-  const itemRegex = /<li class="clearfix">[\s\S]*?<div class="no">(\d+)<\/div>[\s\S]*?<a[^>]*href="https:\/\/movie\.douban\.com\/subject\/(\d+)\/"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<div class="(stay|up|down)">(\d+)<\/div>[\s\S]*?<\/li>/g;
-
-  let match;
-  while ((match = itemRegex.exec(sectionMatch[1])) !== null && results.length < limit) {
-    const type = match[4];
-    const delta = Number(match[5]);
-    const trend = type === 'stay' ? 'stay' : `${type} ${delta}`;
-
-    results.push({
-      rank: Number(match[1]),
-      id: match[2],
-      title: normalizeTitle(match[3]),
-      trend,
-      url: `https://movie.douban.com/subject/${match[2]}/`
-    });
-  }
-
-  if (results.length === 0) {
-    throw new ResponseSchemaError('一周口碑榜区域存在但未解析出条目', `${BASE}/chart`);
-  }
-
-  return results;
 }
 
 /**

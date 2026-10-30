@@ -18,7 +18,7 @@ description: Query Douban (豆瓣) movies, TV shows, books, doulists and user co
 
 | Need | Commands |
 |---|---|
-| Movie and TV discovery | `trending [--movie/--tv]` (real-time hot chart with heat), `hot [--tv]`, `tv <tag>`, `rank <genre>`, `top250`, `now`, `coming`, `weekly` |
+| Movie and TV discovery | `trending [--movie/--tv]` (real-time hot chart with heat), `weekly [--tv/--show] [--global]` (weekly best-rated films, series, variety shows), `hot [--tv]`, `tv <tag>`, `rank <genre>`, `top250`, `now`, `coming` |
 | One movie | `search <keyword>`, then `movie` / `rating` / `comments` / `reviews <id-or-title>` |
 | Books | `book top250` / `chart` / `new` / `search`, then `book info` / `rating` / `comments` / `reviews` / `notes <id, ISBN or title>` |
 | Doulists | `list` (hot doulists), `list <id or url>` (contents) |
@@ -27,7 +27,7 @@ description: Query Douban (豆瓣) movies, TV shows, books, doulists and user co
 | Account changes | `mark` / `rate` / `comment` / `unmark` and the same under `book`, `review`, `follow`, `unfollow` |
 | Files | `export` / `book export [uid] -o <path.json/.csv/.md>`: all three statuses of the user (default: the signed-in account) |
 
-Movie and book details include `recommendations` (similar titles); prefer them over extra searches when suggesting what to watch or read next.
+Movie and book details include `recommendations` (similar titles); prefer them over extra searches when suggesting what to watch or read next. Movie details also list `vendors` (where to stream, with payment such as 单片付费) and `rating_note` (why a title has no rating); an empty `vendors` means Douban lists none, not that it cannot be watched.
 
 When books come from another source (another skill, a file, a photo of a cover), pass their ISBN: `book info`, `book mark` and the other book commands, including `--file` lines, resolve an ISBN exactly without searching. The same title often has several book editions, or several films and series (remakes, 电影 vs 剧集). Never mark by title. `--json` returns `AMBIGUOUS` with `error.matches` when a name hits several works — show those versions and continue only with the ISBN or ID the user chooses. In a terminal the CLI lists matches and asks for a number.
 

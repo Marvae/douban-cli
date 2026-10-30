@@ -15,7 +15,7 @@
 | `douban top250` | 豆瓣电影 Top250 | `--page`、`--limit`，支持交互翻页 |
 | `douban now` | 正在热映（全国） | `--limit` |
 | `douban coming` | 即将上映 | `--limit` |
-| `douban weekly` | 一周口碑榜与排名趋势 | `--limit` |
+| `douban weekly` | 一周口碑电影榜；`--tv` 华语口碑剧集、`--show` 国内口碑综艺，加 `--global` 看全球/国外 | `--tv`、`--show`、`--global`、`--limit` |
 | `douban search <keyword>` | 搜索电影和剧集（自动复用本地登录态，见下文） | `--start`、`--limit` |
 | `douban movie <id-or-title>` | 电影/剧集详情，可直接传 ID 或片名 | `--json` |
 | `douban rating <id-or-title>` | 评分分布、想看/看过统计和类型排名 | ID 或片名 |
@@ -27,6 +27,8 @@
 ```bash
 douban trending                        # 实时热门：综艺、剧集、电影一起排
 douban trending --tv                   # 只看电视榜
+douban weekly --tv                     # 华语口碑剧集榜（每周三更新）
+douban weekly --show --global          # 国外口碑综艺榜
 douban hot --tv --tag 英剧 --limit 10
 douban top250 --page 2
 douban search "奥本海默" --start 20 --limit 20
@@ -40,7 +42,7 @@ douban reviews 1291546 --limit 5
 
 搜索和按片名、书名查询会自动复用本地登录态，未登录时更容易被豆瓣限流；被限流时返回 `RATE_LIMITED`，稍后再试即可。ISBN 走豆瓣的直达地址，不经过搜索。
 
-电影详情包括片名、年份、评分、导演、主演、类型、地区、语言、片长、集数、简介，以及“喜欢这部电影的人也喜欢”（`recommendations`）。推荐或剧集集数读取失败时，不影响其余内容。
+电影详情包括片名、年份、评分（无评分时附豆瓣给的原因，如“暂无评分”）、导演、主演、类型、地区、语言、片长、上映/首播日期、集数、播放平台（`vendors`，如“腾讯视频（单片付费）· 独播”）、简介，以及“喜欢这部电影的人也喜欢”（`recommendations`）。播放平台只列豆瓣收录的，没有列出不代表无处可看。推荐或剧集集数读取失败时，不影响其余内容。
 
 同一片名可能是电影、剧集或翻拍。按片名查询时，会优先完全同名的条目；有多部同名作品时，终端里列出年份和类型供选择。管道和 `--json` 不会自动用第一个，而是返回 `AMBIGUOUS` 并列出候选项，请改用 ID。
 

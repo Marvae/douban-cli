@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getDoulist, parseDoulistId } from '../api/list.ts';
-import { getNowShowing } from '../api/movie.ts';
+import { getMovieDetail, getNowShowing, parseMovieVendors } from '../api/movie.ts';
 import { parseSubjectRecommendations, resolveRecommendations } from '../api/subject.ts';
-import { getTrending } from '../api/trending.ts';
+import { getTrending, getWeeklyChart } from '../api/charts.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -100,7 +100,7 @@ describe('discovery', () => {
     const result = await getTrending('all', 20);
 
     expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain('/subject_collection/subject_real_time_hotest/items?start=0&count=20');
-    expect(result).toMatchObject({ chart: 'all', name: '实时热门书影音', updated_at: '2026-10-30 07:20:52' });
+    expect(result).toMatchObject({ chart: 'all', name: '实时热门书影音', schedule: '每小时更新', updated_at: '2026-10-30 07:20:52' });
     expect(result.items).toEqual([
       expect.objectContaining({ rank: 1, title: '后会友期', type_name: '综艺', rating: '-', rating_note: '暂无评分', heat: 62163720, trend: 'stay',
         url: 'https://movie.douban.com/subject/37100984/' }),
@@ -124,8 +124,66 @@ describe('discovery', () => {
     ]);
 
     fetchMock.mockResolvedValueOnce(Response.json({ subject_collection_items: [{ title: '没有 ID' }] }));
-    await expect(getTrending('all')).rejects.toThrow('实时热门包含无效条目');
+    await expect(getTrending('all')).rejects.toThrow('榜单包含无效条目');
     fetchMock.mockResolvedValueOnce(Response.json({ subject_collection_items: [] }));
-    await expect(getTrending('all')).rejects.toThrow('实时热门没有返回条目');
+    await expect(getTrending('all')).rejects.toThrow('榜单没有返回条目');
+  });
+
+  it('reads the weekly 口碑榜 from the mobile API with its schedule and edition', async () => {
+    const fetchMock = vi.fn(async () => Response.json({
+      start: 0, count: 2, total: 10,
+      subject_collection: { name: '一周口碑电影榜', updated_at: '2026-10-23 16:30:10', description: '每周五更新；关注榜单，第一时间了解最新口碑佳片。' },
+      subject_collection_items: [
+        { id: '37322586', type: 'movie', title: '生日快乐', rank_value: 1, rank_value_changed: 10, trend_up: true,
+          rating: { value: 8.9 }, card_subtitle: '2025 / 埃及 / 剧情' },
+        { id: '37068446', type: 'movie', title: '生化危机：爆发夜', rank_value: 2, rank_value_changed: 5, trend_down: true, rating: { value: 7.3 } }
+      ]
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getWeeklyChart('movie', 10);
+    expect(result).toMatchObject({ chart: 'movie', name: '一周口碑电影榜', schedule: '每周五更新', updated_at: '2026-10-23 16:30:10' });
+    expect(result.items[0]).toMatchObject({ rank: 1, trend: 'up 10', rating: '8.9', meta: '2025 / 埃及 / 剧情' });
+    expect(result.items[0]).not.toHaveProperty('heat');
+    expect(result.items[1]).toMatchObject({ trend: 'down 5' });
+
+    for (const chart of ['tv', 'tv-global', 'show', 'show-global'] as const) await getWeeklyChart(chart);
+    expect(fetchMock.mock.calls.map((call) => new URL(String((call as unknown[])[0])).pathname.split('/')[5])).toEqual([
+      'movie_weekly_best', 'tv_chinese_best_weekly', 'tv_global_best_weekly', 'show_chinese_best_weekly', 'show_global_best_weekly'
+    ]);
+  });
+
+  it('lists streaming platforms from vendors, else linewatches, and skips ads', () => {
+    expect(parseMovieVendors([
+      { title: '腾讯视频', payment_desc: '单片付费', is_paid: true },
+      { title: '推广', is_ad: true },
+      { title: '哔哩哔哩', is_paid: false },
+      { title: '腾讯视频', payment_desc: '重复' }
+    ], [])).toEqual([
+      { name: '腾讯视频', payment: '单片付费' },
+      { name: '哔哩哔哩', payment: '免费' }
+    ]);
+    expect(parseMovieVendors([], [{ free: true, source: { name: '优酷' } }, { source: { name: '爱奇艺' } }])).toEqual([
+      { name: '优酷', payment: '免费' },
+      { name: '爱奇艺', payment: '' }
+    ]);
+    expect(parseMovieVendors(undefined, 'bad')).toEqual([]);
+  });
+
+  it('keeps the unrated reason and platforms in movie detail', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/recommendations')) return Response.json({ items: [] });
+      return Response.json({
+        type: 'tv', title: '尚公主', year: '2026', rating: { value: 0 }, null_rating_reason: '暂无评分',
+        pubdate: ['2026-10-20(中国大陆)'], episodes_count: 36, vendor_desc: '独播',
+        vendors: [{ title: '腾讯视频', payment_desc: 'VIP免费观看' }]
+      });
+    }));
+
+    await expect(getMovieDetail('35861007')).resolves.toMatchObject({
+      rating: '-', rating_note: '暂无评分', pubdate: ['2026-10-20(中国大陆)'],
+      vendors: [{ name: '腾讯视频', payment: 'VIP免费观看' }], vendor_note: '独播'
+    });
   });
 });

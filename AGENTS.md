@@ -12,7 +12,7 @@ Unofficial Douban CLI: Node.js 22.13+, TypeScript ESM, Commander. `src/` builds 
   - `http/` — the read client: timeouts, retries for idempotent GETs, redirects, challenge/login detection, structured `HttpRequestError`.
   - `common.ts` — shared read helpers and `SessionReadOptions` (optional cookies and a warnings sink).
   - `movie.ts`, `book.ts` (+ `book-parsers.ts`), `search.ts`, `list.ts` — domain reads.
-  - `trending.ts` — the real-time hot chart (实时热门), which mixes movies, series, books and music.
+  - `charts.ts` — ranked charts with trends: the hourly 实时热门 (mixes movies, series, books and music) and the weekly 口碑榜 for films, series and variety shows.
   - `subject.ts` — what movies and books genuinely share: ratings, comments, reviews, mobile collections, recommendations.
   - `collection.ts` — user collections, with or without the session; `account.ts` — the signed-in account's profile.
   - `record.ts` — the account's own record: read the edit form, patch, submit, read back.
@@ -24,7 +24,7 @@ Unofficial Douban CLI: Node.js 22.13+, TypeScript ESM, Commander. `src/` builds 
 
 ## Invariants
 
-- Prefer the public mobile JSON API (`m.douban.com/rexxar`); parse HTML only where it has no equivalent (collections, book charts, weekly chart, coming soon, ISBN, the write form).
+- Prefer the public mobile JSON API (`m.douban.com/rexxar`); parse HTML only where it has no equivalent (collections, book charts, coming soon, ISBN, the write form).
 - Treat Douban HTML and JSON as untrusted; validate at the API boundary. A page that cannot be parsed, a challenge or HTTP 429 must raise a structured error, never an empty result.
 - Keep data that was fetched when a later page or source fails, and report it as partial (warnings on stderr, `partial`/`warnings` in JSON).
 - Public reads never read the auth cache implicitly. Commands may pass the cached session explicitly (`getOptionalSessionCookies`) where anonymous access is throttled or incomplete: search, title resolution, collections.

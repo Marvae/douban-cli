@@ -1,16 +1,32 @@
 import { cleanText, fetchJson, isRecord, normalizeTitle, ResponseSchemaError } from './common.js';
 
+// Douban's ranked charts from the public mobile API: the hourly 实时热门
+// and the weekly 口碑榜 for films, series and variety shows. They share one
+// item shape with a rank, a trend against the last edition and a rating.
+
 /** The three tabs of Douban's 实时热门 page: 书影音 (all), 电影榜 and 电视榜. */
 export type TrendingChart = 'all' | 'movie' | 'tv';
 
-const COLLECTIONS: Record<TrendingChart, string> = {
+/** Weekly 口碑榜: films, or series and variety shows (华语/国内 or 全球/国外). */
+export type WeeklyChart = 'movie' | 'tv' | 'tv-global' | 'show' | 'show-global';
+
+const TRENDING_COLLECTIONS: Record<TrendingChart, string> = {
   all: 'subject_real_time_hotest',
   movie: 'movie_real_time_hotest',
   tv: 'tv_real_time_hotest'
 };
 
-/** The chart's own size; Douban returns no more than this. */
+const WEEKLY_COLLECTIONS: Record<WeeklyChart, string> = {
+  movie: 'movie_weekly_best',
+  tv: 'tv_chinese_best_weekly',
+  'tv-global': 'tv_global_best_weekly',
+  show: 'show_chinese_best_weekly',
+  'show-global': 'show_global_best_weekly'
+};
+
+/** The charts' own sizes; Douban returns no more than these. */
 export const TRENDING_LIMIT = 20;
+export const WEEKLY_LIMIT = 10;
 
 const SUBJECT_HOSTS: Record<string, string> = {
   movie: 'movie.douban.com',
@@ -19,22 +35,22 @@ const SUBJECT_HOSTS: Record<string, string> = {
   music: 'music.douban.com'
 };
 
-export interface TrendingItem {
+export interface ChartItem {
   rank: number;
   id: string;
   title: string;
   /** movie, tv, book or music. */
   type: string;
-  /** Douban's label: 电影, 电视剧, 综艺… */
+  /** Douban's label such as 电影, 电视剧 or 综艺; empty on the weekly charts. */
   type_name: string;
   year: string;
   /** '-' when unrated. */
   rating: string;
   /** Why there is no rating, such as 暂无评分; empty when rated. */
   rating_note: string;
-  /** Douban's heat score; higher is hotter. */
-  heat: number;
-  /** `up 1`, `down 2`, `stay` or `new`. */
+  /** Heat score on 实时热门; higher is hotter. Absent on the weekly charts. */
+  heat?: number;
+  /** Against the previous edition: `up 1`, `down 2`, `stay` or `new`. */
   trend: string;
   /** card_subtitle: year / region / genres / director / cast. */
   meta: string;
@@ -42,15 +58,17 @@ export interface TrendingItem {
   cover: string;
 }
 
-export interface TrendingResult {
-  chart: TrendingChart;
+export interface ChartResult {
+  chart: string;
   name: string;
+  /** How often Douban refreshes it, from its own description, such as 每周五更新. */
+  schedule: string;
   /**
    * The chart's `updated_at` as Douban reports it (Beijing time). For the
    * 书影音 chart it can lag the items by hours, so treat it as a hint.
    */
   updated_at: string;
-  items: TrendingItem[];
+  items: ChartItem[];
 }
 
 function trendOf(item: Record<string, unknown>): string {
@@ -69,7 +87,7 @@ function subjectUrl(type: string, id: string, fallback: unknown): string {
   return typeof fallback === 'string' && /^https:\/\/([\w-]+\.)*douban\.com\//.test(fallback) ? fallback : '';
 }
 
-function parseTrendingItem(item: unknown, index: number): TrendingItem | null {
+function parseChartItem(item: unknown, index: number): ChartItem | null {
   if (!isRecord(item)) return null;
   const id = String(item.id ?? '');
   const title = typeof item.title === 'string' ? normalizeTitle(item.title) : '';
@@ -83,6 +101,9 @@ function parseTrendingItem(item: unknown, index: number): TrendingItem | null {
   const cover = isRecord(item.cover) && typeof item.cover.url === 'string'
     ? item.cover.url
     : isRecord(item.pic) && typeof item.pic.normal === 'string' ? item.pic.normal : '';
+  const heat = typeof item.score === 'number' && Number.isFinite(item.score) && item.score > 0
+    ? Math.trunc(item.score)
+    : undefined;
   return {
     rank,
     id,
@@ -92,7 +113,7 @@ function parseTrendingItem(item: unknown, index: number): TrendingItem | null {
     year: typeof item.year === 'string' || typeof item.year === 'number' ? String(item.year) : '',
     rating: rated ? (rating.value as number).toFixed(1) : '-',
     rating_note: !rated && typeof item.null_rating_reason === 'string' ? cleanText(item.null_rating_reason) : '',
-    heat: typeof item.score === 'number' && Number.isFinite(item.score) && item.score > 0 ? Math.trunc(item.score) : 0,
+    ...(heat !== undefined ? { heat } : {}),
     trend: trendOf(item),
     meta: typeof item.card_subtitle === 'string' ? cleanText(item.card_subtitle) : '',
     url: subjectUrl(type, id, item.url),
@@ -100,23 +121,39 @@ function parseTrendingItem(item: unknown, index: number): TrendingItem | null {
   };
 }
 
-/** Douban's real-time hot chart (实时热门), refreshed hourly. */
-export async function getTrending(chart: TrendingChart = 'all', limit = TRENDING_LIMIT): Promise<TrendingResult> {
+/** "每周五更新；关注榜单…" → "每周五更新". */
+function scheduleOf(description: unknown): string {
+  const first = typeof description === 'string' ? cleanText(description).split(/[；;。，,]/)[0] ?? '' : '';
+  return /^每.{1,6}更新$/.test(first) ? first : '';
+}
+
+async function getRankedChart(chart: string, collection: string, limit: number, maximum: number): Promise<ChartResult> {
   if (!Number.isInteger(limit) || limit <= 0) throw new Error('limit 必须是正整数');
-  const collection = COLLECTIONS[chart];
-  const url = `https://m.douban.com/rexxar/api/v2/subject_collection/${collection}/items?start=0&count=${Math.min(limit, TRENDING_LIMIT)}`;
+  const url = `https://m.douban.com/rexxar/api/v2/subject_collection/${collection}/items?start=0&count=${Math.min(limit, maximum)}`;
   const data = await fetchJson<unknown>(url, { Referer: `https://m.douban.com/subject_collection/${collection}` });
   if (!isRecord(data) || !Array.isArray(data.subject_collection_items)) {
-    throw new ResponseSchemaError('实时热门接口返回格式异常', url);
+    throw new ResponseSchemaError('榜单接口返回格式异常', url);
   }
-  const items = data.subject_collection_items.map(parseTrendingItem);
-  if (items.some((item) => item === null)) throw new ResponseSchemaError('实时热门包含无效条目', url);
-  if (items.length === 0) throw new ResponseSchemaError('实时热门没有返回条目', url);
+  const items = data.subject_collection_items.map(parseChartItem);
+  if (items.some((item) => item === null)) throw new ResponseSchemaError('榜单包含无效条目', url);
+  if (items.length === 0) throw new ResponseSchemaError('榜单没有返回条目', url);
   const meta = isRecord(data.subject_collection) ? data.subject_collection : {};
   return {
     chart,
-    name: typeof meta.name === 'string' && meta.name ? cleanText(meta.name) : '实时热门',
+    name: typeof meta.name === 'string' && meta.name ? cleanText(meta.name) : '豆瓣榜单',
+    schedule: scheduleOf(meta.description),
     updated_at: typeof meta.updated_at === 'string' ? meta.updated_at : '',
-    items: (items as TrendingItem[]).slice(0, limit)
+    items: (items as ChartItem[]).slice(0, limit)
   };
+}
+
+/** Douban's real-time hot chart (实时热门), refreshed hourly. */
+export async function getTrending(chart: TrendingChart = 'all', limit = TRENDING_LIMIT): Promise<ChartResult> {
+  const result = await getRankedChart(chart, TRENDING_COLLECTIONS[chart], limit, TRENDING_LIMIT);
+  return { ...result, schedule: '每小时更新' };
+}
+
+/** A weekly 口碑榜: films, or Chinese or global series and variety shows. */
+export async function getWeeklyChart(chart: WeeklyChart = 'movie', limit = WEEKLY_LIMIT): Promise<ChartResult> {
+  return getRankedChart(chart, WEEKLY_COLLECTIONS[chart], limit, WEEKLY_LIMIT);
 }

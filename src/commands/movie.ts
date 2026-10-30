@@ -9,11 +9,10 @@ import {
   getRank,
   getRatingStats,
   getReviews,
-  getTop250,
-  getWeekly
+  getTop250
 } from '../api/movie.js';
 import { searchMovies } from '../api/search.js';
-import { getTrending, TRENDING_LIMIT } from '../api/trending.js';
+import { getTrending, getWeeklyChart, TRENDING_LIMIT, WEEKLY_LIMIT, type WeeklyChart } from '../api/charts.js';
 import { getOptionalSessionCookies } from '../auth/index.js';
 import { CliArgumentError, printWarnings, withErrorHandler } from '../utils/error.js';
 import {
@@ -134,7 +133,7 @@ export function registerMovieCommands(program: Command): void {
         return;
       }
       // The 书影音 chart reports an updated_at hours older than its items, so the heading does not show it.
-      console.log(`\n🔥 ${result.name} · 每小时更新\n`);
+      console.log(`\n🔥 ${result.name} · ${result.schedule}\n`);
       renderTable(result.items, [
         { header: '#', value: (item) => String(item.rank), minWidth: 2 },
         { header: '变化', value: (item) => formatTrend(item.trend) || '—' },
@@ -342,31 +341,37 @@ export function registerMovieCommands(program: Command): void {
   program
     .command('weekly')
     .helpGroup('电影:')
-    .description('一周口碑榜')
-    .option('-n, --limit <n>', '返回数量', '10')
+    .description('一周口碑榜：电影，或 --tv 剧集、--show 综艺（加 --global 看全球/国外）')
+    .option('--tv', '华语口碑剧集榜')
+    .option('--show', '国内口碑综艺榜')
+    .option('--global', '与 --tv / --show 同用：全球口碑剧集榜、国外口碑综艺榜')
+    .option('-n, --limit <n>', `返回数量（最多 ${WEEKLY_LIMIT}）`, String(WEEKLY_LIMIT))
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler({
       command: 'weekly',
-      suggestion: '可尝试：douban weekly'
+      suggestion: '可尝试：douban weekly --tv'
     }, async (opts) => {
-      const limit = parsePositiveInt(opts.limit, '--limit', 10);
-      const items = await withSpinner(
-        '正在获取一周口碑榜...',
-        () => getWeekly(limit),
-        !opts.json
-      );
+      if (opts.tv && opts.show) throw new CliArgumentError('--tv 与 --show 不能同时使用');
+      if (opts.global && !opts.tv && !opts.show) throw new CliArgumentError('--global 需要与 --tv 或 --show 同用');
+      const base = opts.tv ? 'tv' : opts.show ? 'show' : 'movie';
+      const chart = (opts.global ? `${base}-global` : base) as WeeklyChart;
+      const limit = parsePositiveIntAtMost(opts.limit, '--limit', WEEKLY_LIMIT, WEEKLY_LIMIT);
+      const result = await withSpinner('正在获取口碑榜...', () => getWeeklyChart(chart, limit), !opts.json);
 
       if (opts.json) {
-        console.log(JSON.stringify(items, null, 2));
-      } else {
-        console.log('\n📈 一周口碑榜\n');
-        renderTable(items, [
-          { header: '#', value: (item) => String(item.rank), minWidth: 2 },
-          { header: '片名', value: (item) => item.title, minWidth: 18 },
-          { header: '变化', value: (item) => formatTrend(item.trend) || '—' },
-          idColumn()
-        ]);
+        console.log(JSON.stringify(result, null, 2));
+        return;
       }
+      const edition = result.updated_at ? `本期 ${result.updated_at.slice(0, 10)}` : '';
+      console.log(`\n📈 ${[result.name, result.schedule, edition].filter(Boolean).join(' · ')}\n`);
+      renderTable(result.items, [
+        { header: '#', value: (item) => String(item.rank), minWidth: 2 },
+        { header: '变化', value: (item) => formatTrend(item.trend) || '—' },
+        { header: '片名', value: (item) => item.title, maxWidth: 24 },
+        { header: '评分', value: (item) => item.rating },
+        { header: '年份 / 地区', value: (item) => item.meta.split(' / ').slice(0, 2).join(' / '), maxWidth: 20 },
+        idColumn()
+      ]);
     }));
 
   program
@@ -438,14 +443,21 @@ export function registerMovieCommands(program: Command): void {
         const kind = detail.type === 'tv' ? '📺' : '🎬';
         console.log(`\n${kind} ${detail.title}${titleSuffix}${originalTitle}${detail.type === 'tv' ? ' · 剧集' : ''}`);
         console.log(`ID: ${detail.id}`);
-        console.log(`评分: ${detail.rating || '-'}`);
+        console.log(`评分: ${detail.rating || '-'}${detail.rating === '-' && detail.rating_note ? `（${detail.rating_note}）` : ''}`);
         console.log(`类型: ${formatDetailList(detail.genres)}`);
         console.log(`国家: ${formatDetailList(detail.countries)}`);
         console.log(`时长: ${formatDetailList(detail.durations)}`);
+        if (detail.pubdate.length > 0) {
+          console.log(`${detail.type === 'tv' ? '首播' : '上映'}: ${formatDetailList(detail.pubdate)}`);
+        }
         if (detail.episodes_info) {
           console.log(`集数: ${detail.episodes_info}`);
         } else if (detail.episodes_count) {
           console.log(`集数: ${detail.episodes_count}`);
+        }
+        if (detail.vendors.length > 0) {
+          const vendors = detail.vendors.map((vendor) => (vendor.payment ? `${vendor.name}（${vendor.payment}）` : vendor.name));
+          console.log(`播放: ${vendors.join(' / ')}${detail.vendor_note ? ` · ${detail.vendor_note}` : ''}`);
         }
         console.log(`语言: ${formatDetailList(detail.languages)}`);
         console.log(`短评: ${detail.comment_count.toLocaleString()}`);
