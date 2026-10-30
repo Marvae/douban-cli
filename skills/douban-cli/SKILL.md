@@ -18,7 +18,7 @@ description: Query Douban (豆瓣) movies, TV shows, books, doulists and user co
 
 | Need | Commands |
 |---|---|
-| Movie and TV discovery | `hot [--tv]`, `tv <tag>`, `rank <genre>`, `top250`, `now`, `coming`, `weekly` |
+| Movie and TV discovery | `trending [--movie/--tv]` (real-time hot chart with heat), `hot [--tv]`, `tv <tag>`, `rank <genre>`, `top250`, `now`, `coming`, `weekly` |
 | One movie | `search <keyword>`, then `movie` / `rating` / `comments` / `reviews <id-or-title>` |
 | Books | `book top250` / `chart` / `new` / `search`, then `book info` / `rating` / `comments` / `reviews` / `notes <id, ISBN or title>` |
 | Doulists | `list` (hot doulists), `list <id or url>` (contents) |

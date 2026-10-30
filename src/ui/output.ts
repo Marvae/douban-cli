@@ -72,10 +72,11 @@ export function formatStars(rating: number | null | undefined): string {
   return rating && rating > 0 ? '★'.repeat(rating) : '未评分';
 }
 
-/** 🔺3 / 🔻1 / — from Douban trend markers such as "up 3", "down1" or "stay". */
+/** 🔺3 / 🔻1 / — / 新 from Douban trend markers such as "up 3", "down1", "stay" or "new". */
 export function formatTrend(trend: string | undefined): string {
   const match = trend?.match(/^(up|down)\s*(\d*)/);
   if (match) return `${match[1] === 'up' ? '🔺' : '🔻'}${match[2]}`;
+  if (trend === 'new') return '新';
   return trend === 'stay' ? '—' : '';
 }
 

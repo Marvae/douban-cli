@@ -35,7 +35,7 @@ $ npx @marvae24/douban-cli now
 | 备份豆瓣观影、读书记录 | `douban export -o movies.md`，`douban book export -o books.csv` |
 | 把微信读书读完的书同步到豆瓣 | 同时装上微信读书官方 Skill，对 AI 说“把我今年在微信读书读完的书标到豆瓣”；按 ISBN 精确匹配，先预览再提交 |
 | 找下一部想看的 | 对 AI 说“推荐几部像《沙丘》的电影”，或 `douban movie 沙丘` 看相似推荐 |
-| 查评分和榜单 | `douban top250`、`douban now`、`douban weekly`、`douban book info <ISBN>` |
+| 查评分和榜单 | `douban trending`（实时热门）、`douban top250`、`douban now`、`douban weekly`、`douban book info <ISBN>` |
 
 ## 在 AI agent 里使用
 
@@ -70,7 +70,7 @@ douban book mark 2567698 --read --dry-run   # 先预览，确认后去掉 --dry-
 
 | 分类 | 命令 |
 |---|---|
-| 电影与剧集 | `hot` `tv` `rank` `top250` `now` `coming` `weekly` `search` `movie` `rating` `comments` `reviews` |
+| 电影与剧集 | `trending` `hot` `tv` `rank` `top250` `now` `coming` `weekly` `search` `movie` `rating` `comments` `reviews` |
 | 图书 | `book top250` `chart` `new` `search` `info` `rating` `comments` `reviews` `notes` |
 | 用户与豆列 | `me` `book me` `user` `book user` `list` `config` |
 | 账号与备份 | `login` `whoami` `logout` `record` `stats` `export`，图书加 `book` 前缀 |

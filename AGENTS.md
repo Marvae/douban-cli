@@ -12,6 +12,7 @@ Unofficial Douban CLI: Node.js 22.13+, TypeScript ESM, Commander. `src/` builds 
   - `http/` — the read client: timeouts, retries for idempotent GETs, redirects, challenge/login detection, structured `HttpRequestError`.
   - `common.ts` — shared read helpers and `SessionReadOptions` (optional cookies and a warnings sink).
   - `movie.ts`, `book.ts` (+ `book-parsers.ts`), `search.ts`, `list.ts` — domain reads.
+  - `trending.ts` — the real-time hot chart (实时热门), which mixes movies, series, books and music.
   - `subject.ts` — what movies and books genuinely share: ratings, comments, reviews, mobile collections, recommendations.
   - `collection.ts` — user collections, with or without the session; `account.ts` — the signed-in account's profile.
   - `record.ts` — the account's own record: read the edit form, patch, submit, read back.

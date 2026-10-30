@@ -8,6 +8,7 @@
 
 | 命令 | 能做什么 | 常用参数 |
 |---|---|---|
+| `douban trending` | 豆瓣实时热门（书影音综合榜，每小时更新），含热度和排名变化 | `--movie`、`--tv`、`--limit`（最多 20） |
 | `douban hot` | 热门电影；加 `--tv` 查看剧集 | `--tv`、`--tag`、`--limit` |
 | `douban tv <tag>` | 按标签查看剧集 | `热门/美剧/英剧/日剧/韩剧/国产剧/综艺/最新` |
 | `douban rank <genre>` | 按类型查看高分电影 | `--limit` |
@@ -24,6 +25,8 @@
 类型排行支持：剧情、喜剧、动作、爱情、科幻、动画、悬疑、惊悚、恐怖、纪录片、短片、情色、同性、音乐、歌舞、家庭、儿童、传记、历史、战争、犯罪、西部、奇幻、冒险、灾难、武侠、古装、运动、黑色电影。
 
 ```bash
+douban trending                        # 实时热门：综艺、剧集、电影一起排
+douban trending --tv                   # 只看电视榜
 douban hot --tv --tag 英剧 --limit 10
 douban top250 --page 2
 douban search "奥本海默" --start 20 --limit 20

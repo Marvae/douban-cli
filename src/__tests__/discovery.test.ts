@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getDoulist, parseDoulistId } from '../api/list.ts';
 import { getNowShowing } from '../api/movie.ts';
 import { parseSubjectRecommendations, resolveRecommendations } from '../api/subject.ts';
+import { getTrending } from '../api/trending.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -78,5 +79,53 @@ describe('discovery', () => {
       expect.objectContaining({ id: '1', rating: '7.3', release_date: '10.05', meta: '2026 / 美国' }),
       expect.objectContaining({ id: '2', rating: '-', release_date: '10.16' })
     ]);
+  });
+
+  it('maps the real-time hot chart: heat, trend, unrated reason and per-type links', async () => {
+    const fetchMock = vi.fn(async () => Response.json({
+      start: 0, count: 4, total: 20,
+      subject_collection: { name: '实时热门书影音', updated_at: '2026-10-30 07:20:52' },
+      subject_collection_items: [
+        { id: '37100984', type: 'tv', type_name: '综艺', title: '后会友期', year: '2026', rank_value: 1, rank_value_changed: 0,
+          trend_equal: true, score: 62163720, rating: { value: 0, count: 0 }, null_rating_reason: '暂无评分' },
+        { id: '37322586', type: 'movie', type_name: '电影', title: '生日快乐', year: '2025', rank_value: 2, rank_value_changed: 1,
+          trend_up: true, score: 640720, rating: { value: 8.9, count: 20956 }, null_rating_reason: '' },
+        { id: '2567698', type: 'book', type_name: '图书', title: '三体', rank_value: 3, rank_value_changed: -2,
+          trend_down: true, score: 1200, rating: { value: 8.9 } },
+        { id: '1', type: 'tv', type_name: '电视剧', title: '新剧', rank_value: 4, is_new: true, score: 900 }
+      ]
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getTrending('all', 20);
+
+    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain('/subject_collection/subject_real_time_hotest/items?start=0&count=20');
+    expect(result).toMatchObject({ chart: 'all', name: '实时热门书影音', updated_at: '2026-10-30 07:20:52' });
+    expect(result.items).toEqual([
+      expect.objectContaining({ rank: 1, title: '后会友期', type_name: '综艺', rating: '-', rating_note: '暂无评分', heat: 62163720, trend: 'stay',
+        url: 'https://movie.douban.com/subject/37100984/' }),
+      expect.objectContaining({ rank: 2, rating: '8.9', rating_note: '', trend: 'up 1', url: 'https://movie.douban.com/subject/37322586/' }),
+      expect.objectContaining({ rank: 3, type: 'book', trend: 'down 2', url: 'https://book.douban.com/subject/2567698/' }),
+      expect.objectContaining({ rank: 4, trend: 'new' })
+    ]);
+  });
+
+  it('reads the movie and TV tabs from their own charts and rejects a malformed chart', async () => {
+    const fetchMock = vi.fn(async () => Response.json({
+      subject_collection_items: [{ id: '1', type: 'movie', title: '电影', rank_value: 1, score: 10 }]
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getTrending('movie', 10);
+    await getTrending('tv', 5);
+    expect(fetchMock.mock.calls.map((call) => new URL(String((call as unknown[])[0])).pathname)).toEqual([
+      '/rexxar/api/v2/subject_collection/movie_real_time_hotest/items',
+      '/rexxar/api/v2/subject_collection/tv_real_time_hotest/items'
+    ]);
+
+    fetchMock.mockResolvedValueOnce(Response.json({ subject_collection_items: [{ title: '没有 ID' }] }));
+    await expect(getTrending('all')).rejects.toThrow('实时热门包含无效条目');
+    fetchMock.mockResolvedValueOnce(Response.json({ subject_collection_items: [] }));
+    await expect(getTrending('all')).rejects.toThrow('实时热门没有返回条目');
   });
 });

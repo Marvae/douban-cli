@@ -13,6 +13,7 @@ import {
   getWeekly
 } from '../api/movie.js';
 import { searchMovies } from '../api/search.js';
+import { getTrending, TRENDING_LIMIT } from '../api/trending.js';
 import { getOptionalSessionCookies } from '../auth/index.js';
 import { CliArgumentError, printWarnings, withErrorHandler } from '../utils/error.js';
 import {
@@ -109,6 +110,40 @@ export function registerMovieCommands(program: Command): void {
           idColumn()
         ]);
       }
+    }));
+
+  program
+    .command('trending')
+    .helpGroup('电影:')
+    .description('豆瓣实时热门（书影音综合，--movie / --tv 看分榜，每小时更新）')
+    .option('--movie', '只看电影榜')
+    .option('--tv', '只看电视榜（剧集和综艺）')
+    .option('-n, --limit <n>', `返回数量（最多 ${TRENDING_LIMIT}）`, String(TRENDING_LIMIT))
+    .option('--json', '以 JSON 输出')
+    .action(withErrorHandler({
+      command: 'trending',
+      suggestion: '可尝试：douban trending --tv'
+    }, async (opts) => {
+      if (opts.movie && opts.tv) throw new CliArgumentError('--movie 与 --tv 不能同时使用');
+      const chart = opts.movie ? 'movie' : opts.tv ? 'tv' : 'all';
+      const limit = parsePositiveIntAtMost(opts.limit, '--limit', TRENDING_LIMIT, TRENDING_LIMIT);
+      const result = await withSpinner('正在获取实时热门...', () => getTrending(chart, limit), !opts.json);
+
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      // The 书影音 chart reports an updated_at hours older than its items, so the heading does not show it.
+      console.log(`\n🔥 ${result.name} · 每小时更新\n`);
+      renderTable(result.items, [
+        { header: '#', value: (item) => String(item.rank), minWidth: 2 },
+        { header: '变化', value: (item) => formatTrend(item.trend) || '—' },
+        { header: '片名', value: (item) => item.title, maxWidth: 24 },
+        { header: '类型', value: (item) => item.type_name },
+        { header: '评分', value: (item) => item.rating },
+        { header: '热度', value: (item) => compactNumber(item.heat) },
+        idColumn()
+      ]);
     }));
 
   program

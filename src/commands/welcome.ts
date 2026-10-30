@@ -2,6 +2,7 @@ import { detectAuthSession } from '../auth/index.js';
 import { getDisplayWidth, padDisplayEnd } from '../ui/text.js';
 
 const COMMON_COMMANDS: Array<[string, string]> = [
+  ['douban trending', '豆瓣实时热门（每小时更新）'],
   ['douban now', '正在热映'],
   ['douban top250', '豆瓣电影 Top250'],
   ['douban movie 沙丘', '电影详情（ID 或片名），附相似推荐'],
