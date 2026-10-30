@@ -11,6 +11,8 @@ updates:
       # Keep type definitions on the oldest supported Node.js line.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
