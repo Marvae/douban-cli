@@ -17,7 +17,7 @@
 | `douban coming` | 即将上映 | `--limit` |
 | `douban weekly` | 一周口碑电影榜；`--tv` 华语口碑剧集、`--show` 国内口碑综艺，加 `--global` 看全球/国外 | `--tv`、`--show`、`--global`、`--limit` |
 | `douban search <keyword>` | 搜索电影和剧集（自动复用本地登录态，见下文） | `--start`、`--limit` |
-| `douban movie <id-or-title>` | 电影/剧集详情，可直接传 ID 或片名 | `--json` |
+| `douban movie <id-or-title>` | 电影/剧集详情，可直接传 ID 或片名；剧集加 `--episode` 看单集 | `--episode`、`--json` |
 | `douban rating <id-or-title>` | 评分分布、想看/看过统计和类型排名 | ID 或片名 |
 | `douban comments <id-or-title>` | 热门短评 | `--page`、`--limit` |
 | `douban reviews <id-or-title>` | 热门影评 | `--page`、`--limit` |
@@ -34,6 +34,7 @@ douban top250 --page 2
 douban search "奥本海默" --start 20 --limit 20
 douban movie 35593344
 douban movie "沙丘"
+douban movie 26302614 --episode 20   # 请回答1988 第 20 集
 douban rating 1291546
 douban rating 沙丘
 douban comments 1291546
@@ -43,6 +44,8 @@ douban reviews 1291546 --limit 5
 搜索和按片名、书名查询会自动复用本地登录态，未登录时更容易被豆瓣限流；被限流时返回 `RATE_LIMITED`，稍后再试即可。ISBN 走豆瓣的直达地址，不经过搜索。
 
 电影详情包括片名、年份、评分（无评分时附豆瓣给的原因，如“暂无评分”）、导演、主演、类型、地区、语言、片长、上映/首播日期、集数、播放平台（`vendors`，如“腾讯视频（单片付费）· 独播”）、简介，以及“喜欢这部电影的人也喜欢”（`recommendations`）。播放平台只列豆瓣收录的，没有列出不代表无处可看。推荐或剧集集数读取失败时，不影响其余内容。
+
+剧集加 `--episode <n>` 查看第 n 集：本集中文名、播放时间、剧情简介，以及全剧集数。“本集原名”只在豆瓣网页版上有，需要登录才能读取，所以只在已运行 `douban login` 时显示；读取失败时其余内容照常输出，并提示原因（JSON 中 `partial`/`warnings`）。分集资料由豆瓣用户编辑，常常不全，缺的字段显示“暂无”（JSON 中为 `null`）。集数超出范围时返回 `NOT_FOUND`。
 
 同一片名可能是电影、剧集或翻拍。按片名查询时，会优先完全同名的条目；有多部同名作品时，终端里列出年份和类型供选择。管道和 `--json` 不会自动用第一个，而是返回 `AMBIGUOUS` 并列出候选项，请改用 ID。
 

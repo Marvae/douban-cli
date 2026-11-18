@@ -24,10 +24,10 @@ Unofficial Douban CLI: Node.js 22.13+, TypeScript ESM, Commander. `src/` builds 
 
 ## Invariants
 
-- Prefer the public mobile JSON API (`m.douban.com/rexxar`); parse HTML only where it has no equivalent (collections, book charts, coming soon, ISBN, the write form).
+- Prefer the public mobile JSON API (`m.douban.com/rexxar`); parse HTML only where it has no equivalent (collections, book charts, coming soon, ISBN, the write form, episode original titles).
 - Treat Douban HTML and JSON as untrusted; validate at the API boundary. A page that cannot be parsed, a challenge or HTTP 429 must raise a structured error, never an empty result.
 - Keep data that was fetched when a later page or source fails, and report it as partial (warnings on stderr, `partial`/`warnings` in JSON).
-- Public reads never read the auth cache implicitly. Commands may pass the cached session explicitly (`getOptionalSessionCookies`) where anonymous access is throttled or incomplete: search, title resolution, collections.
+- Public reads never read the auth cache implicitly. Commands may pass the cached session explicitly (`getOptionalSessionCookies`) where anonymous access is throttled or incomplete: search, title resolution, collections, episode original titles.
 - A write by title runs only as a dry run or after confirmation in a terminal; batch files take IDs (and ISBNs for books), never titles. A title may name several books (editions) or movies (remakes, film vs series): the terminal lists them to pick; `--json` and pipes return `AMBIGUOUS` with `matches` instead of using the first. Prefer ISBN/ID when the specific work matters.
 - Writes always go through `record.ts`: start from the current form, change only requested fields, never submit `share-shuo`, and verify by reading back. Writes are never retried, except one `ck` refresh.
 - `--json` sends results to stdout and structured errors to stderr; non-TTY output never paginates interactively and ends with the next `--page` hint.

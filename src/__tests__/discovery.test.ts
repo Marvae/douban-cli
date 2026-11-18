@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getDoulist, parseDoulistId } from '../api/list.ts';
-import { getMovieDetail, getNowShowing, parseMovieVendors } from '../api/movie.ts';
+import { getEpisode, getMovieDetail, getNowShowing, parseEpisodeOriginalTitle, parseMovieVendors } from '../api/movie.ts';
 import { parseSubjectRecommendations, resolveRecommendations } from '../api/subject.ts';
 import { getTrending, getWeeklyChart } from '../api/charts.ts';
 
@@ -168,6 +168,43 @@ describe('discovery', () => {
       { name: '爱奇艺', payment: '' }
     ]);
     expect(parseMovieVendors(undefined, 'bad')).toEqual([]);
+  });
+
+  it('parses the original episode title from the desktop episode page', () => {
+    const page = (value: string) => `<ul class="ep-info">
+      <li><span>本集中文名:</span> <span class="all">试播集</span></li>
+      <li><span>本集原名:</span>
+        <span class="all">${value}</span>
+      </li>
+      <li><span>播放时间:</span> <span class="all">2008-01-20</span> 星期天</li></ul>`;
+    const url = 'https://movie.douban.com/subject/2373195/episode/1/';
+
+    expect(parseEpisodeOriginalTitle(page('Pilot'), url)).toBe('Pilot');
+    expect(parseEpisodeOriginalTitle(page('暂无，欢迎添加'), url)).toBeNull();
+    expect(() => parseEpisodeOriginalTitle('<title>豆瓣</title>', url)).toThrow('分集页面缺少本集原名');
+  });
+
+  it('keeps the episode when its original title cannot be read, and rejects a missing episode', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.hostname === 'movie.douban.com') return new Response('<a href="https://sec.douban.com/c">验证</a>', { status: 200 });
+      if (url.pathname.endsWith('/forum_topics')) {
+        return Response.json(url.searchParams.get('episode') === '99'
+          ? { total: 0, forum_topics: [], episode: null }
+          : { total: 6, forum_topics: [], episode: { number: 1, title: '试播集', broadcast_date: '2008-01-20', summary: '' } });
+      }
+      return Response.json({ title: '绝命毒师 第一季', episodes_count: 7 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getEpisode('2373195', 1, { cookies: 'dbcl2="1:x"' })).resolves.toMatchObject({
+      title: '绝命毒师 第一季',
+      episodes_count: 7,
+      episode: { number: 1, title: '试播集', original_title: null, broadcast_date: '2008-01-20', summary: null },
+      partial: true,
+      warnings: [expect.stringContaining('豆瓣要求安全验证')]
+    });
+    await expect(getEpisode('2373195', 99)).rejects.toThrow('共 7 集，第 99 集不存在');
   });
 
   it('keeps the unrated reason and platforms in movie detail', async () => {

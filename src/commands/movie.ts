@@ -3,6 +3,7 @@ import {
   GENRES,
   getComing,
   getComments,
+  getEpisode,
   getHot,
   getMovieDetail,
   getNowShowing,
@@ -420,14 +421,41 @@ export function registerMovieCommands(program: Command): void {
   program
     .command('movie <id-or-title>')
     .helpGroup('电影:')
-    .description('电影详情和相似推荐（ID 或片名）')
+    .description('电影详情和相似推荐（ID 或片名）；剧集加 --episode 看单集')
+    .option('--episode <n>', '剧集的第 n 集：本集名称、播放时间、剧情简介；登录后含本集原名')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler((args) => ({
       command: 'movie',
       target: `ID: ${String(args[0] || '未指定')}`,
       suggestion: '确认 ID 是否正确，可使用 douban search 搜索'
     }), async (id, opts) => {
+      const episodeNumber = opts.episode === undefined ? undefined : parsePositiveInt(opts.episode, '--episode', 1);
       const { id: movieId } = await resolveSubject('movie', id, Boolean(opts.json));
+
+      if (episodeNumber !== undefined) {
+        // Only the original title needs the session; without one it is left out.
+        const cookies = await getOptionalSessionCookies();
+        const result = await withSpinner(
+          '正在获取分集信息...',
+          () => getEpisode(movieId, episodeNumber, { cookies }),
+          !opts.json
+        );
+        printWarnings(result.warnings);
+        if (opts.json) {
+          console.log(JSON.stringify(result, null, 2));
+          return;
+        }
+        const { episode } = result;
+        const originalTitle = episode.original_title
+          ?? (!cookies ? '登录后显示（douban login）' : result.partial ? '-' : '暂无');
+        console.log(`\n📺 ${result.title} · 第 ${episode.number} 集${result.episodes_count ? `（共 ${result.episodes_count} 集）` : ''}`);
+        console.log(`本集中文名: ${episode.title ?? '暂无'}`);
+        console.log(`本集原名: ${originalTitle}`);
+        console.log(`播放时间: ${episode.broadcast_date ?? '暂无'}`);
+        console.log(`\n剧情简介:\n${episode.summary ?? '暂无'}`);
+        console.log(`\n链接: ${episode.url}`);
+        return;
+      }
 
       const detail = await withSpinner(
         '正在获取电影详情...',

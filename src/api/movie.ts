@@ -1,4 +1,14 @@
-import { BASE, cleanText, fetchHtml, fetchJson, isRecord, normalizeTitle, ResponseSchemaError } from './common.js';
+import {
+  BASE,
+  cleanText,
+  fetchHtml,
+  fetchJson,
+  HttpRequestError,
+  isRecord,
+  normalizeTitle,
+  ResponseSchemaError,
+  type SessionReadOptions
+} from './common.js';
 import {
   getSubjectComments,
   getSubjectRatingStats,
@@ -243,6 +253,108 @@ export async function getMovieDetail(id: string): Promise<MovieDetail> {
     }
   }
   return detail;
+}
+
+/** One episode of a series. Douban's episode data is edited by users and often incomplete. */
+export interface EpisodeDetail {
+  /** The series. */
+  id: string;
+  title: string;
+  episodes_count?: number;
+  episode: {
+    number: number;
+    /** 本集中文名. */
+    title: string | null;
+    /** 本集原名: only on the desktop page, which needs a login, so null without one. */
+    original_title: string | null;
+    broadcast_date: string | null;
+    summary: string | null;
+    url: string;
+  };
+  partial: boolean;
+  warnings: string[];
+}
+
+/** 本集原名 from the desktop episode page; null when Douban has none (“暂无，欢迎添加”). */
+export function parseEpisodeOriginalTitle(html: string, url: string): string | null {
+  const info = html.match(/<ul class="ep-info">([\s\S]*?)<\/ul>/)?.[1];
+  const item = info?.match(/<span>\s*本集原名\s*[:：]\s*<\/span>([\s\S]*?)<\/li>/)?.[1];
+  if (item === undefined) throw new ResponseSchemaError('分集页面缺少本集原名', url);
+  // Long values come as a short and a full ("all") copy.
+  const text = cleanText(item.match(/<span class="all[^"]*">([\s\S]*?)<\/span>/)?.[1] ?? item);
+  return text && !text.startsWith('暂无') ? text : null;
+}
+
+/**
+ * One episode from the mobile API, which has everything but the original title.
+ * That comes from the desktop page, read only with a session the caller passes.
+ */
+export async function getEpisode(id: string, number: number, options: SessionReadOptions = {}): Promise<EpisodeDetail> {
+  const seriesId = id.trim();
+  if (!/^\d+$/.test(seriesId)) throw new Error('剧集 ID 必须是纯数字');
+  if (!Number.isInteger(number) || number <= 0) throw new Error('集数必须是正整数');
+
+  const headers = { Referer: `https://m.douban.com/movie/subject/${seriesId}/` };
+  // The episode rides along with the discussions filtered to it.
+  const episodeUrl = `${MOBILE_API}/tv/${seriesId}/forum_topics?start=0&count=1&episode=${number}`;
+  let series: MobileMovieResponse;
+  let topics: unknown;
+  try {
+    [series, topics] = await Promise.all([
+      fetchJson<MobileMovieResponse>(`${MOBILE_API}/tv/${seriesId}`, headers),
+      fetchJson<unknown>(episodeUrl, headers)
+    ]);
+  } catch (error) {
+    if (error instanceof HttpRequestError && error.status === 404) {
+      throw new Error(`${seriesId} 不是剧集，或条目不存在`, { cause: error });
+    }
+    throw error;
+  }
+
+  const title = normalizeTitle(series?.title ?? '');
+  if (!title) throw new ResponseSchemaError('剧集详情接口未返回标题', `${MOBILE_API}/tv/${seriesId}`);
+  const episodesCount = positiveInt(series.episodes_count);
+  if (!isRecord(topics) || !('episode' in topics)) throw new ResponseSchemaError('分集接口返回格式异常', episodeUrl);
+  // An episode beyond the last comes back as null.
+  if (topics.episode === null) {
+    throw new Error(`《${title}》${episodesCount ? `共 ${episodesCount} 集，` : ''}第 ${number} 集不存在`);
+  }
+  const episode = topics.episode;
+  if (!isRecord(episode) || episode.number !== number) throw new ResponseSchemaError('分集接口返回了其他集', episodeUrl);
+  const text = (value: unknown) => (typeof value === 'string' && cleanText(value)) || null;
+
+  const pageUrl = `${BASE}/subject/${seriesId}/episode/${number}/`;
+  const warnings: string[] = [];
+  let originalTitle: string | null = null;
+  if (options.cookies?.trim()) {
+    try {
+      const html = await fetchHtml(pageUrl, { Cookie: options.cookies, Referer: `${BASE}/subject/${seriesId}/` });
+      originalTitle = parseEpisodeOriginalTitle(html, pageUrl);
+    } catch (error) {
+      const reason = error instanceof HttpRequestError && error.code === 'AUTH_REQUIRED'
+        ? '本地登录已失效，运行 douban login 重新登录'
+        : error instanceof HttpRequestError && error.code === 'CHALLENGE'
+          ? '豆瓣要求安全验证，请稍后再试'
+          : error instanceof Error ? error.message : String(error);
+      warnings.push(`未能读取本集原名：${reason}`);
+    }
+  }
+
+  return {
+    id: seriesId,
+    title,
+    ...(episodesCount ? { episodes_count: episodesCount } : {}),
+    episode: {
+      number,
+      title: text(episode.title),
+      original_title: originalTitle,
+      broadcast_date: text(episode.broadcast_date),
+      summary: text(episode.summary),
+      url: pageUrl
+    },
+    partial: warnings.length > 0,
+    warnings
+  };
 }
 
 /**
