@@ -49,6 +49,7 @@ afterEach(() => {
   process.exitCode = originalExitCode;
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
   vi.doUnmock('@steipete/sweet-cookie');
   vi.doUnmock('node:child_process');
@@ -408,21 +409,88 @@ describe('authentication safety', () => {
     expect(spawnSyncMock).toHaveBeenCalledOnce();
   });
 
-  it('detects a stored Chromium login from cookie names without the Keychain', async () => {
+  it('detects a stored Chromium login, and a new one, from cookie metadata without the Keychain', async () => {
     const profileDir = path.join(tempHome, 'Library', 'Application Support', 'Arc', 'User Data', 'Default');
     mkdirSync(profileDir, { recursive: true });
     const { DatabaseSync } = await import('node:sqlite');
     const db = new DatabaseSync(path.join(profileDir, 'Cookies'));
-    db.exec("CREATE TABLE cookies (host_key TEXT, name TEXT, encrypted_value BLOB); INSERT INTO cookies VALUES ('.douban.com', 'dbcl2', x'00')");
+    // Real Chromium times are larger than Number.MAX_SAFE_INTEGER.
+    db.exec(`CREATE TABLE cookies (host_key TEXT, name TEXT, path TEXT, creation_utc INTEGER, expires_utc INTEGER, encrypted_value BLOB);
+      INSERT INTO cookies VALUES ('.douban.com', 'dbcl2', '/', 13408000000000000, 13410000000000000, x'00')`);
     const auth = await import('../auth/index.ts');
 
-    await expect(auth.hasStoredDoubanLogin('arc', undefined, 'darwin', tempHome)).resolves.toBe(true);
+    const saved = await auth.storedDoubanLoginStamp('arc', undefined, 'darwin', tempHome);
+    expect(saved).toEqual(expect.any(String));
+    // Logging in again keeps the creation time but sets a new expiry.
+    db.exec("UPDATE cookies SET expires_utc = 13410000000000001");
+    await expect(auth.storedDoubanLoginStamp('arc', undefined, 'darwin', tempHome)).resolves.not.toBe(saved);
     db.exec("DELETE FROM cookies");
     db.close();
-    await expect(auth.hasStoredDoubanLogin('arc', undefined, 'darwin', tempHome)).resolves.toBe(false);
-    await expect(auth.hasStoredDoubanLogin('arc', 'Profile 2', 'darwin', tempHome)).resolves.toBeUndefined();
-    await expect(auth.hasStoredDoubanLogin('firefox', undefined, 'darwin', tempHome)).resolves.toBeUndefined();
-    await expect(auth.hasStoredDoubanLogin('arc', undefined, 'linux', tempHome)).resolves.toBeUndefined();
+    await expect(auth.storedDoubanLoginStamp('arc', undefined, 'darwin', tempHome)).resolves.toBeNull();
+    await expect(auth.storedDoubanLoginStamp('arc', 'Profile 2', 'darwin', tempHome)).resolves.toBeUndefined();
+    await expect(auth.storedDoubanLoginStamp('firefox', undefined, 'darwin', tempHome)).resolves.toBeUndefined();
+    await expect(auth.storedDoubanLoginStamp('arc', undefined, 'linux', tempHome)).resolves.toBeUndefined();
+  });
+
+  describe('browser login', () => {
+    function mockBrowserLogin(stamps: Array<string | null | undefined>) {
+      const stampMock = vi.fn(async () => (stamps.length > 1 ? stamps.shift() : stamps[0]));
+      const question = vi.fn().mockResolvedValue('');
+      const spawnSyncMock = vi.fn().mockReturnValue({ status: 0 });
+      const getCookies = vi.fn();
+      vi.doMock('node:child_process', () => ({ spawnSync: spawnSyncMock }));
+      vi.doMock('node:readline/promises', () => ({ default: { createInterface: () => ({ question, close: vi.fn() }) } }));
+      vi.doMock('@steipete/sweet-cookie', () => ({ getCookies }));
+      vi.doMock('../auth/browser-cookies.ts', async (importOriginal) => ({
+        ...await importOriginal<typeof import('../auth/browser-cookies.ts')>(),
+        storedDoubanLoginStamp: stampMock
+      }));
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(profileHtml('alice', 'Alice'), { status: 200 })));
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+      return { spawnSyncMock, getCookies };
+    }
+
+    afterEach(() => {
+      vi.doUnmock('../auth/browser-cookies.ts');
+    });
+
+    it('waits for the browser to save a new login before reading the Keychain', async () => {
+      const { getCookies } = mockBrowserLogin([null, null, 'saved']);
+      getCookies.mockResolvedValue({ cookies: [{ name: 'dbcl2', value: 'fresh', source: { browser: 'chrome' } }], warnings: [] });
+      vi.useFakeTimers();
+      const auth = await import('../auth/index.ts');
+
+      const login = auth.loginWithBrowser({ browser: 'arc', open: true });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await expect(login).resolves.toMatchObject({ accountId: 'alice' });
+      expect(getCookies).toHaveBeenCalledOnce();
+    });
+
+    it('stops at a cookie store it cannot read, without offering the login page or showing local paths', async () => {
+      const { spawnSyncMock, getCookies } = mockBrowserLogin([undefined]);
+      getCookies.mockResolvedValue({
+        cookies: [],
+        warnings: ["Failed to read Safari cookies: EPERM: operation not permitted, open '/Users/someone/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies'"]
+      });
+      const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+      // Safari is read only on macOS.
+      Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+      let error: unknown;
+      try {
+        const auth = await import('../auth/index.ts');
+        error = await auth.loginWithBrowser({ browser: 'safari' }).catch((reason: unknown) => reason);
+      } finally {
+        if (platform) Object.defineProperty(process, 'platform', platform);
+      }
+
+      expect((error as Error).message).toContain('完全磁盘访问权限');
+      expect((error as Error).message).not.toContain('/Users/');
+      expect(stderr).not.toHaveBeenCalled();
+      expect(spawnSyncMock).not.toHaveBeenCalled();
+      expect(getCookies).toHaveBeenCalledOnce();
+    });
   });
 
   it('does not inspect or open a browser for non-interactive browser login', async () => {
@@ -523,16 +591,17 @@ describe('authentication safety', () => {
     expect(output).not.toContain('cookies');
   });
 
-  it('opens the current-account page in the selected browser', async () => {
+  it('opens the login page, which lands on the account page, in the selected browser', async () => {
     const auth = await import('../auth/index.ts');
+    const loginUrl = 'https://accounts.douban.com/passport/login?redir=https://www.douban.com/mine/';
 
     expect(auth.resolveLoginLaunchCommand('darwin', 'arc')).toEqual({
       command: 'open',
-      args: ['-b', 'company.thebrowser.Browser', 'https://www.douban.com/mine/']
+      args: ['-b', 'company.thebrowser.Browser', loginUrl]
     });
     expect(auth.resolveLoginLaunchCommand('darwin', 'chrome')).toEqual({
       command: 'open',
-      args: ['-b', 'com.google.Chrome', 'https://www.douban.com/mine/']
+      args: ['-b', 'com.google.Chrome', loginUrl]
     });
   });
 
@@ -544,7 +613,7 @@ describe('authentication safety', () => {
     expect(() => auth.assertInteractiveLogin(undefined)).toThrow('douban login 需要交互式终端');
   });
 
-  it('prints provider warnings while redacting returned cookie values', async () => {
+  it('redacts returned cookie values from provider warnings in debug output', async () => {
     const reader = vi.fn().mockResolvedValue({
       cookies: [
         { name: 'dbcl2', value: 'browser-secret', source: { browser: 'chrome' } },
@@ -554,6 +623,8 @@ describe('authentication safety', () => {
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(profileHtml('alice', 'Alice'), { status: 200 })));
     const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    // Raw provider warnings are printed only for debugging.
+    vi.stubEnv('DOUBAN_DEBUG', '1');
     const auth = await import('../auth/index.ts');
 
     await auth.loginFromBrowserCookies({ browser: 'chrome' }, reader);
@@ -588,11 +659,11 @@ describe('authentication safety', () => {
     const auth = await import('../auth/index.ts');
 
     await expect(auth.loginFromBrowserCookies({ browser: 'chrome' }, reader as never))
-      .rejects.toThrow('未找到可验证的豆瓣登录态');
+      .rejects.toThrow('读取 Chrome 的 Cookie 失败');
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(existsSync(authCachePath())).toBe(false);
-    expect(stderr.mock.calls.map((call) => String(call[0])).join('\n')).toContain('sweet-cookie 返回了无效');
+    expect(stderr).not.toHaveBeenCalled();
   });
 
   it('does not combine dbcl2 and ck from different profiles', async () => {

@@ -3,7 +3,10 @@ import { spawnSync } from 'node:child_process';
 import { type BrowserName, type LoginOptions, normalizeBrowserSource } from './browser-cookies.js';
 import { asObject } from './cookies.js';
 
-const DOUBAN_ACCOUNT_URL = 'https://www.douban.com/mine/';
+// The login form, which then lands on the account page. The account page alone only says
+// "no permission" when signed out. The redirect target stays unencoded: cmd's `start` would
+// treat %XX as variables.
+const DOUBAN_LOGIN_URL = 'https://accounts.douban.com/passport/login?redir=https://www.douban.com/mine/';
 interface LoginLaunchCommand {
   command: string;
   args: string[];
@@ -100,8 +103,8 @@ export function resolveLoginLaunchCommand(
     return {
       command: 'open',
       args: browser
-        ? ['-b', MAC_BROWSER_BUNDLE_IDS[browser], DOUBAN_ACCOUNT_URL]
-        : [DOUBAN_ACCOUNT_URL]
+        ? ['-b', MAC_BROWSER_BUNDLE_IDS[browser], DOUBAN_LOGIN_URL]
+        : [DOUBAN_LOGIN_URL]
     };
   }
 
@@ -116,8 +119,8 @@ export function resolveLoginLaunchCommand(
       throw new Error(`当前平台暂不支持自动打开 ${normalizeBrowserSource(browser)}`);
     }
     return command
-      ? { command, args: [DOUBAN_ACCOUNT_URL] }
-      : { command: 'xdg-open', args: [DOUBAN_ACCOUNT_URL] };
+      ? { command, args: [DOUBAN_LOGIN_URL] }
+      : { command: 'xdg-open', args: [DOUBAN_LOGIN_URL] };
   }
 
   if (platform === 'win32') {
@@ -133,8 +136,8 @@ export function resolveLoginLaunchCommand(
     return {
       command: 'cmd',
       args: command
-        ? ['/c', 'start', '', command, DOUBAN_ACCOUNT_URL]
-        : ['/c', 'start', '', DOUBAN_ACCOUNT_URL]
+        ? ['/c', 'start', '', command, DOUBAN_LOGIN_URL]
+        : ['/c', 'start', '', DOUBAN_LOGIN_URL]
     };
   }
 

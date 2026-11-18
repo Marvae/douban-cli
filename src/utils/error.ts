@@ -233,7 +233,8 @@ function suggestRecovery(error: unknown, code: CliErrorCode, ctx: CommandErrorCo
   if (code === 'RATE_LIMITED') {
     return '豆瓣暂时限制了请求，请稍后再试，避免连续重试；未登录时更容易被限制，可先运行 douban login';
   }
-  if (code === 'AUTH_REQUIRED') return '运行 douban login，复用浏览器里已登录的豆瓣';
+  // Telling a failed login to run login again would go in circles.
+  if (code === 'AUTH_REQUIRED' && ctx.command !== 'login') return '运行 douban login，复用浏览器里已登录的豆瓣';
   if (code === 'NETWORK_ERROR') return '检查网络连接后重试';
   if (code === 'AMBIGUOUS' && error instanceof AmbiguousMatchError && error.matches[0]) {
     return `改用 ID 再查：${error.matches[0].id}`;

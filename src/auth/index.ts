@@ -3,7 +3,7 @@ export type { AuthSession, VerifiedAuthSession, ParsedAuthCookies } from './cook
 export { parseCookieHeader, parseNetscapeCookies } from './cookies.js';
 export { clearAuthCache } from './cache.js';
 export type { BrowserName, BrowserCookieTarget, LoginOptions, BrowserCookieReader } from './browser-cookies.js';
-export { resolveBrowserCookieTarget, hasStoredDoubanLogin } from './browser-cookies.js';
+export { resolveBrowserCookieTarget, storedDoubanLoginStamp } from './browser-cookies.js';
 export { browserFromSystemIdentifier, detectDefaultBrowser, resolveLoginLaunchCommand } from './browser-open.js';
 export { detectAuthSession, getOptionalSessionCookies, ensureAuth } from './session.js';
 export type { CookieInputStream } from './login.js';

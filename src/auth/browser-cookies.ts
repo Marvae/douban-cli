@@ -2,12 +2,12 @@
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { debug } from '../utils/debug.js';
 import {
   type AuthSession,
   asObject,
   normalizeAuthCookieValue,
   createSession,
-  reportRecoverableError,
   stripControlCharacters
 } from './cookies.js';
 
@@ -105,11 +105,25 @@ function sanitizeCookieWarning(warning: string, cookies: SweetCookieResult['cook
   }
   return sanitized;
 }
-function reportCookieWarnings(result: SweetCookieResult, browser: BrowserName): void {
-  for (const warning of result.warnings) {
-    const sanitized = sanitizeCookieWarning(warning, result.cookies);
-    if (sanitized) console.error(`[auth] ${normalizeBrowserSource(browser)} Cookie 提示: ${sanitized}`);
+/**
+ * What a sweet-cookie warning means for the user, or undefined when the store
+ * was still read. Its wording (English, local paths) is kept for DOUBAN_DEBUG.
+ */
+function describeCookieWarning(browser: BrowserName, warning: string): string | undefined {
+  const name = normalizeBrowserSource(browser);
+  // Cookies left out on purpose: the store itself was read.
+  if (/partitioned|container-scoped/i.test(warning)) return undefined;
+  // Before the permission check: a Keychain failure says "permission denied" too.
+  if (/keychain/i.test(warning)) {
+    return `没有拿到读取 ${name} Cookie 的钥匙串授权：请在弹窗中选择“允许”，授权较慢时可加 --cookie-timeout`;
   }
+  if (/EPERM|EACCES|operation not permitted|permission denied/i.test(warning)) {
+    return browser === 'safari'
+      ? '没有权限读取 Safari 的 Cookie：请在“系统设置 → 隐私与安全性 → 完全磁盘访问权限”中允许当前终端，重新打开终端后再试'
+      : `没有权限读取 ${name} 的 Cookie 文件`;
+  }
+  if (/not found/i.test(warning)) return `没有找到 ${name} 的 Cookie 文件：确认已安装并用过 ${name}`;
+  return `读取 ${name} 的 Cookie 失败（加 DOUBAN_DEBUG=1 查看原因）`;
 }
 export function normalizeBrowserSource(source: string): string {
   const lower = source.trim().toLowerCase();
@@ -205,10 +219,16 @@ async function loadBrowserCookieReader(): Promise<BrowserCookieReader> {
     });
   }
 }
+/** Douban sessions found in the browsers, and why a cookie store could not be read. */
+export interface BrowserCookieScan {
+  sessions: AuthSession[];
+  /** For the user, without local paths. A store that could not be read says nothing about the login. */
+  problems: string[];
+}
 export async function extractFromBrowsers(
   options: LoginOptions = {},
   reader?: BrowserCookieReader
-): Promise<AuthSession[]> {
+): Promise<BrowserCookieScan> {
   validateLoginOptions(options);
 
   const browsers: BrowserName[] = options.browser
@@ -225,6 +245,7 @@ export async function extractFromBrowsers(
   }));
   const getCookies = reader || await loadBrowserCookieReader();
   const sessions: AuthSession[] = [];
+  const problems = new Set<string>();
 
   for (const { browser, backend, chromiumBrowser } of targets) {
     try {
@@ -237,10 +258,15 @@ export async function extractFromBrowsers(
         ...(chromiumBrowser ? { chromiumBrowser } : {}),
         ...profileOptions(browser, options.profile)
       }));
-      reportCookieWarnings(result, browser);
+      for (const warning of result.warnings) {
+        debug('auth', `${normalizeBrowserSource(browser)} Cookie 提示: ${sanitizeCookieWarning(warning, result.cookies)}`);
+        const problem = describeCookieWarning(browser, warning);
+        if (problem) problems.add(problem);
+      }
       sessions.push(...sessionsFromCookies(result, browser, options.profile));
     } catch (error) {
-      reportRecoverableError(`从 ${normalizeBrowserSource(browser)} 提取 Cookie 失败`, error);
+      debug('auth', `${normalizeBrowserSource(browser)} Cookie 读取失败: ${stripControlCharacters(error instanceof Error ? error.message : String(error))}`);
+      problems.add(`读取 ${normalizeBrowserSource(browser)} 的 Cookie 失败（加 DOUBAN_DEBUG=1 查看原因）`);
     }
   }
 
@@ -249,7 +275,7 @@ export async function extractFromBrowsers(
     const key = `${session.source}:${session.dbcl2}`;
     if (!deduped.has(key)) deduped.set(key, session);
   }
-  return [...deduped.values()];
+  return { sessions: [...deduped.values()], problems: [...problems] };
 }
 export function resolveBrowserCookieTarget(
   browser: BrowserName,
@@ -286,20 +312,23 @@ async function importNodeSqlite(): Promise<typeof import('node:sqlite')> {
   }
 }
 /**
- * Whether a Chromium browser's default macOS profile stores a Douban login.
- * Cookie names and hosts are not encrypted, so this reads no Keychain secret
- * and cannot trigger a Safe Storage prompt. Returns undefined when unknown.
+ * What a Chromium browser's default macOS profile has saved of the Douban
+ * login: a stamp that changes when the login is saved again, null when none is
+ * saved, undefined when unknown. Cookie names, hosts and dates are not
+ * encrypted, so this reads no Keychain secret and cannot trigger a Safe
+ * Storage prompt.
  */
-export async function hasStoredDoubanLogin(
+export async function storedDoubanLoginStamp(
   browser: BrowserName,
   profile: string | undefined,
   platform: NodeJS.Platform = process.platform,
   home = os.homedir()
-): Promise<boolean | undefined> {
+): Promise<string | null | undefined> {
   const root = CHROMIUM_COOKIE_ROOTS[browser];
   if (platform !== 'darwin' || !root || profile !== undefined) return undefined;
   const profileDir = path.join(home, 'Library', 'Application Support', ...root, 'Default');
-  const dbPath = [path.join(profileDir, 'Network', 'Cookies'), path.join(profileDir, 'Cookies')].find((file) => existsSync(file));
+  // The same database sweet-cookie reads: the legacy location first.
+  const dbPath = [path.join(profileDir, 'Cookies'), path.join(profileDir, 'Network', 'Cookies')].find((file) => existsSync(file));
   if (!dbPath) return undefined;
 
   // Query a private copy: the browser may hold the database open.
@@ -311,9 +340,14 @@ export async function hasStoredDoubanLogin(
     const { DatabaseSync } = await importNodeSqlite();
     const db = new DatabaseSync(path.join(directory, 'Cookies'));
     try {
-      return db.prepare(
-        "SELECT 1 FROM cookies WHERE name = 'dbcl2' AND (host_key = 'douban.com' OR host_key LIKE '%.douban.com') LIMIT 1"
-      ).get() !== undefined;
+      // Chromium times exceed Number.MAX_SAFE_INTEGER, so read them as text. A new
+      // login gets a new expiry even when the browser keeps the creation time.
+      const rows = db.prepare(
+        "SELECT host_key || '|' || path || '|' || CAST(creation_utc AS TEXT) || '|' || CAST(expires_utc AS TEXT) AS stamp"
+        + " FROM cookies WHERE name = 'dbcl2' AND (host_key = 'douban.com' OR host_key LIKE '%.douban.com')"
+        + ' ORDER BY host_key, path'
+      ).all();
+      return rows.length > 0 ? rows.map((row) => String(row.stamp)).join(';') : null;
     } finally {
       db.close();
     }

@@ -9,18 +9,20 @@ douban login
 douban whoami
 ```
 
-`login` 读取你浏览器里已有的豆瓣登录（只取 `dbcl2` / `ck`），确认账号后加密保存到本机。默认使用系统默认浏览器；浏览器里还没登录豆瓣时，会先问你要不要打开登录页。
+`login` 读取你浏览器里已有的豆瓣登录（只取 `dbcl2` / `ck`），确认账号后加密保存到本机。默认使用系统默认浏览器；浏览器里还没登录豆瓣或登录已失效时，会先问你要不要打开登录页。
 
 ```bash
 douban login --browser arc                         # 指定浏览器：chrome、edge、firefox、safari、arc
 douban login --browser chrome --profile "Profile 2"
-douban login --open                                # 直接打开豆瓣页面，不再询问
+douban login --open                                # 直接打开豆瓣登录页，不再询问
 douban login --cookie-timeout 120                  # 钥匙串授权较慢时延长等待（1-300 秒，默认 60）
 ```
 
 - 需要在交互式终端里运行。
-- macOS 读取 Chrome、Edge、Arc 的登录时会弹出钥匙串授权，每次登录只弹一次。选“允许”即可；“始终允许”以后不再询问，但本机其他程序也能借此读取这个浏览器的 Cookie。
-- Safari 和 Arc 仅支持 macOS；`--profile` 需要同时指定 `--browser`，且不能与 `--open` 同用。
+- 刚在浏览器里登录完，浏览器可能要过几十秒才把登录存下来。macOS 上 Chrome、Edge、Arc 的默认配置会自动等它保存（最多 35 秒）再读取；其他浏览器或配置会提示你稍等后按回车再试。
+- macOS 读取 Chrome、Edge、Arc 的登录时会弹出钥匙串授权，通常每次登录只弹一次；浏览器里的登录已失效、需要重新登录后再读时会再弹一次。选“允许”即可；“始终允许”以后不再询问，但本机其他程序也能借此读取这个浏览器的 Cookie。
+- Safari 和 Arc 仅支持 macOS。读取 Safari 需要在“系统设置 → 隐私与安全性 → 完全磁盘访问权限”中允许你的终端。
+- `--profile` 需要同时指定 `--browser`，且不能与 `--open` 同用。
 - 最终保存的账号以验证结果为准，可用 `douban whoami` 确认。
 - 会记住上次用的浏览器；下次直接 `douban login` 即可，换浏览器时加 `--browser`。
 

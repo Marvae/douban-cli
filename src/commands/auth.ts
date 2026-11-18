@@ -60,13 +60,13 @@ export function registerAuthCommands(program: Command): void {
     .option('--browser <browser>', '明确从指定浏览器读取登录态（Arc 仅 macOS）')
     .option('--profile <profile>', '指定浏览器配置目录（需配合 --browser）')
     .option('--cookie-timeout <seconds>', '浏览器 Cookie/钥匙串读取超时（1-300 秒）')
-    .option('--open', '打开浏览器的豆瓣当前账号页（不能与 --profile 同用）')
+    .option('--open', '在浏览器中打开豆瓣登录页（不能与 --profile 同用）')
     .option('--cookie-stdin', '从非交互式标准输入读取单行 Cookie 请求头')
     .option('--cookie-file <path>', '从 Netscape cookies.txt 文件读取 Cookie')
     .option('--json', '以 JSON 输出')
     .action(withErrorHandler({
       command: 'login',
-      suggestion: '可尝试：douban login，或显式使用 --cookie-stdin / --cookie-file'
+      suggestion: '也可以用 --browser 换浏览器，或用 --cookie-stdin / --cookie-file 手动导入'
     }, async (opts) => {
       const cookieStdin = Boolean(opts.cookieStdin);
       const cookieFileProvided = typeof opts.cookieFile === 'string';
