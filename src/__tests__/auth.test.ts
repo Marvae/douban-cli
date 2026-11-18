@@ -460,7 +460,7 @@ describe('authentication safety', () => {
       vi.useFakeTimers();
       const auth = await import('../auth/index.ts');
 
-      const login = auth.loginWithBrowser({ browser: 'arc', open: true });
+      const login = auth.loginWithBrowser({ browser: 'chrome', open: true });
       await vi.advanceTimersByTimeAsync(1_000);
 
       await expect(login).resolves.toMatchObject({ accountId: 'alice' });
